@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.ktma.bothnow"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.ktma.bothnow"
