@@ -39,8 +39,8 @@ dependencies {
     implementation("androidx.camera:camera-video:1.4.2")
 
     // Media3 video processing and watermark overlays
-    implementation("androidx.media3:media3-common:1.5.1")
-    implementation("androidx.media3:media3-effect:1.5.1")
-    implementation("androidx.media3:media3-transformer:1.5.1")
+    implementation("androidx.media3:media3-common:1.6.1")
+    implementation("androidx.media3:media3-effect:1.6.1")
+    implementation("androidx.media3:media3-transformer:1.6.1")
 
 }
