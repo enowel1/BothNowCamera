@@ -1,5 +1,4 @@
 package com.ktma.bothnow
-
 import android.Manifest
 import android.content.ContentValues
 import android.content.Intent
