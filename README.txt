@@ -1,12 +1,16 @@
-BothNow Camera - native Android wrapper
+BothNow Camera — Dual Format Native Android App
 
-GET AN APK WITHOUT ANDROID STUDIO (GitHub):
-1. Create a free GitHub account, make a new repository, and upload ALL files from this folder
-   (keep the .github folder). Easiest: "Add file > Upload files" and drag everything in.
-2. Open the repository's Actions tab. The "Build APK" run starts by itself (5-8 minutes).
-3. Open the finished run, open the Artifacts section, and download "BothNowCamera-APK". Extract it and install app-debug.apk on your phone. If GitHub asks, allow installation from your browser or file manager.
+FEATURES
+- Native CameraX camera preview, photo capture, front/rear camera, torch and zoom.
+- Record one source video once, then export two MP4 files: Landscape 16:9 (1920x1080) and Portrait 9:16 (1080x1920).
+- Users upload their OWN watermark/logo from the phone (PNG, JPG or WEBP). The selected image is burned into both exports; the app brand logo is only the Android app icon/header.
+- Custom watermark can be enabled/disabled, removed/replaced, and its corner position, size and opacity adjusted before recording. The selected logo is remembered for future sessions.
+- Videos are saved to Movies/BothNow; photos to Pictures/BothNow.
 
-OR WITH ANDROID STUDIO: File > Open this folder, then Build > Build APK(s).
+IMPORTANT FRAMING NOTE
+The two outputs are generated from the same camera recording by center-cropping to each aspect ratio. This is one take, not two independent camera sensors. Keep the main subject near the centre with enough space around it. A single camera frame cannot preserve every edge in both 16:9 and 9:16 at once. The portrait and landscape exports are cropped versions of the same master recording.
 
-Requires Android 10 (API 29) or newer. Videos save automatically to Gallery > Movies > BothNow. The app requests camera and microphone access when the camera starts. Internet access is used only for external resources such as the default logo; the main camera interface is bundled and works offline.
-To change the app later, edit app/src/main/assets/index.html.
+BUILD ON GITHUB
+Upload the contents of this folder to the root of the repository (including .github/workflows/build.yml), commit, then download the BothNowCamera-APK artifact from Actions.
+
+Requires Android 10 / API 29 or newer. Uses CameraX and AndroidX Media3 Transformer.
