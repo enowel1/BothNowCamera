@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#070b1d">
+<title>BothNow Camera</title>
+<style>
+:root{--accent:#00d9ff;--muted:#aab7d5}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;background:#07091b;color:#f4f8ff;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
+button{border:1px solid #30445e;border-radius:14px;padding:11px 14px;background:linear-gradient(180deg,#20334b,#17263a);color:#f7fbff;font-weight:700;font-size:14px}
+button:active{transform:scale(.97)}
+button.primary{background:linear-gradient(115deg,#00d9ff,#653cff 48%,#ff28c8 78%,#ff9d00);border-color:#4ddfff;color:#fff}
+button:disabled{opacity:.45}
+#app{height:100dvh;width:100vw;display:flex;flex-direction:column;background:radial-gradient(ellipse at 50% -20%,#222d70,#090d25 58%)}
+.top{height:60px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:#0b1030;border-bottom:1px solid #35417c}
+.brand img{display:block;width:154px;height:44px;padding:5px 11px;object-fit:contain;background:#fff;border-radius:12px}
+.brand b{font-size:18px;letter-spacing:.04em}
+#status{font-size:10px;letter-spacing:.08em;color:#a9c3d5;background:#19224c;border:1px solid #3a4a91;border-radius:30px;padding:7px 10px}
+#status.rec{color:#fff;background:#b0202c;border-color:#ff5560}
+#stageWrap{position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:8px}
+#stage{position:relative;width:100%;height:100%;max-width:177.78vh;max-height:56.25vw;aspect-ratio:16/9;overflow:hidden;background:#18212b;border:1px solid #456079;border-radius:18px;touch-action:none}
+#video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:center;display:none;will-change:transform}
+#placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:#aab8c8;padding:24px;background:radial-gradient(ellipse,#273748,#101923)}
+#placeholder strong{display:block;font-size:20px;color:#fff;margin-bottom:8px}
+#grid{position:absolute;inset:0;pointer-events:none;background:linear-gradient(to right,transparent 33.15%,#fff5 33.33%,transparent 33.5%,transparent 66.48%,#fff5 66.66%,transparent 66.84%),linear-gradient(to bottom,transparent 33.15%,#fff5 33.33%,transparent 33.5%,transparent 66.48%,#fff5 66.66%,transparent 66.84%)}
+#portrait{position:absolute;height:94%;aspect-ratio:9/16;left:50%;top:50%;transform:translate(-50%,-50%);border:2px solid #fff;box-shadow:0 0 0 9999px #0002;touch-action:none;cursor:grab;overflow:hidden}
+#portrait:after{content:"9:16 PORTRAIT";position:absolute;top:5px;left:5px;font-size:9px;letter-spacing:.08em;background:#0009;padding:4px 5px;border-radius:4px;pointer-events:none}
+#logo,#portraitLogo{position:absolute;object-fit:contain;filter:drop-shadow(0 2px 5px #000);pointer-events:none;z-index:2;opacity:.9;max-height:20%}
+#controls{flex:none;background:#0b1030;border-top:1px solid #35417c;padding:12px 14px calc(12px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:11px}
+.toolbar{display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+.toolbar button{padding:9px 12px;font-size:12px}
+.bottom{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.small{font-size:11px;color:var(--muted)}
+.zoom-controls{display:flex;align-items:center;gap:5px}.zoom-controls button{padding:7px 10px;font-size:12px;min-width:36px}.zoom-controls input{width:88px;accent-color:var(--accent)}
+#record{min-width:118px;padding:14px 22px;border-radius:30px;font-size:15px}
+#record.recording{background:#7d2027}
+#result,#settings{display:none;position:absolute;inset:0;z-index:5;background:linear-gradient(160deg,#1a2455,#080d23 70%);overflow:auto;padding:18px}
+.resultgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}
+.previewbox{background:#18234c;border:1px solid #3b4a88;border-radius:16px;padding:12px;min-width:0;display:flex;flex-direction:column;gap:8px}
+.previewbox video{width:100%;max-height:34vh;background:#000;object-fit:contain;border-radius:7px}
+.previewbox a{color:#65eaff;font-size:12px}
+.field{padding:13px 0;border-bottom:1px solid #293f58;display:flex;flex-direction:column;gap:9px}
+.field label{font-size:13px;color:#d9e2ec}
+input[type=range]{width:100%;accent-color:var(--accent)}
+select{background:#202b58;color:#fff;border:0;border-radius:8px;padding:9px}
+#toast{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);background:#263343;padding:9px 13px;border-radius:20px;font-size:12px;display:none;z-index:9;max-width:92%;text-align:center}
+@media (orientation:portrait){.top{height:48px}#stage{height:auto;max-height:70vh}#controls{gap:7px;padding-top:8px}.toolbar button{padding:8px 9px}#record{padding:12px 18px}}
+</style>
+</head>
+<body>
+<div id="app">
+ <header class="top">
+  <div class="brand"><b id="brandText">BothNow</b><img id="brandImg" alt="BothNow" hidden></div>
+  <div id="status">CAMERA OFF</div>
+  <button id="settingsBtn">⚙ Settings</button>
+ </header>
+ <main id="stageWrap">
+  <div id="stage">
+   <div id="placeholder"><div><strong>BothNow Camera</strong>Starting camera…<br>Landscape + portrait recording with microphone audio.<br><br><button id="startCamera" class="primary">Start Camera</button></div></div>
+   <video id="video" autoplay muted playsinline></video>
+   <div id="grid"></div>
+   <div id="portrait"><img id="portraitLogo" alt="" hidden></div>
+   <img id="logo" alt="" hidden>
+  </div>
+  <div id="toast"></div>
+  <section id="result">
+   <button id="backResult">← Camera</button>
+   <h2>Your videos are ready</h2>
+   <div class="small" id="fmtInfo"></div>
+   <button id="shareBoth" class="primary" style="width:100%;padding:15px;margin-top:10px">↗ Save Both to Gallery</button>
+   <p id="saveMessage" class="small">Tap, then choose Gallery / Photos / Files in the Android menu.</p>
+   <div class="resultgrid">
+    <div class="previewbox"><b>Landscape · 16:9</b><video id="landPreview" controls playsinline></video><button id="shareL">Save landscape</button><a id="landDownload" hidden>Download file</a></div>
+    <div class="previewbox"><b>Portrait · 9:16</b><video id="portPreview" controls playsinline></video><button id="shareP">Save portrait</button><a id="portDownload" hidden>Download file</a></div>
+   </div>
+   <button id="recordAgain" class="primary">Record another video</button>
+   <p class="small" style="margin-top:18px;line-height:1.7;text-align:center">Developed by Kekeli Emmanuel · All copyrights reserved by Kekeli Tech Media Agency<br><a href="https://www.ktmaonline.com" target="_blank" rel="noopener" style="color:#65eaff">www.ktmaonline.com</a> · <a href="tel:+233264783970" style="color:#65eaff">+233 26 478 3970</a></p>
+  </section>
+  <section id="settings">
+   <button id="closeSettings">← Back</button><h2>Settings & Branding</h2>
+   <div class="field"><label>Choose your permanent brand logo</label><input id="logoFile" type="file" accept="image/*"><span class="small">Saved on this device, works offline.</span><button id="removeLogo" type="button">Reset to default logo</button></div>
+   <div class="field"><label><input id="logoToggle" type="checkbox" checked> Show logo on screen and exports</label></div>
+   <div class="field"><label>Landscape logo size <span id="landSizeVal">14%</span></label><input id="landSize" type="range" min="4" max="35" value="14"></div>
+   <div class="field"><label>Portrait logo size <span id="portSizeVal">14%</span></label><input id="portSize" type="range" min="4" max="35" value="14"></div>
+   <div class="field"><label><input id="logoMotionToggle" type="checkbox" checked> Move logo to a new spot every 2 seconds</label></div>
+   <div class="field"><label>Video quality</label><select id="quality"><option value="hd">HD 720p (best)</option><option value="sd">SD 540p (cooler phone, smaller files)</option></select></div>
+   <div class="field"><label>Frame rate</label><select id="fps"><option value="30">30 fps (smooth)</option><option value="24">24 fps</option><option value="15">15 fps (lightest)</option></select></div>
+   <div class="field"><label><input id="autoSave" type="checkbox"> Auto-download both files when recording stops</label><span class="small">Tries to save straight to the phone's Downloads. If your app build blocks it, use the Save buttons.</span></div>
+   <div class="field"><label><input id="gridToggle" type="checkbox" checked> Show framing grid</label></div>
+   <div class="field"><label><input id="fullToggle" type="checkbox"> Full Mode (hide portrait frame and grid)</label></div>
+   <div class="field"><label>About BothNow</label><div class="small" style="line-height:1.8">Developed by <b>Kekeli Emmanuel</b><br>All copyrights reserved by <b>Kekeli Tech Media Agency</b><br><a href="https://www.ktmaonline.com" target="_blank" rel="noopener" style="color:#65eaff">www.ktmaonline.com</a> · <a href="tel:+233264783970" style="color:#65eaff">+233 26 478 3970</a></div></div>
+  </section>
+ </main>
+ <footer id="controls">
+  <div class="toolbar">
+   <button id="gridBtn">Grid: ON</button>
+   <button id="fullBtn">Full Mode: OFF</button>
+   <button id="logoBtn">Logo: ON</button>
+  </div>
+  <div class="bottom">
+   <div><div id="zoomLabel">Zoom 1.0×</div><div class="zoom-controls"><button id="zoomOut" type="button">−</button><input id="zoomRange" type="range" min="1" max="4" step="0.1" value="1"><button id="zoomIn" type="button">+</button><button id="zoomReset" type="button">Reset</button></div><div class="small">Pinch to zoom · drag the portrait frame</div></div>
+   <button id="record" class="primary" disabled>● Record</button>
+   <button id="switchCamera">Flip</button>
+  </div>
+ </footer>
+</div>
+<script>
+(()=>{
+ const $=id=>document.getElementById(id);
+ const video=$('video'),stage=$('stage'),portrait=$('portrait'),grid=$('grid'),logo=$('logo'),portraitLogo=$('portraitLogo');
+ const LOGO_KEY='bothnow_saved_logo_v1',DEFAULT_CACHE_KEY='bothnow_default_logo_cache_v1';
+ const DEFAULT_LOGO_URL='https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEhoCGL5Ygaj-BGzbMS3gGJzxy9ILRjx5aG_VUg7CtBy6-pvWz2R7RtuRTHsqfT_Y-Cc18AQp4X1zQT-P4PCm1xyYTTBXVqmnmNF74c6_e1sVHlKHxMMD4Kcc0w4y4_KQ50D7Wu8YP8ZqDzWLEkA2fyGD1MxGaIj-sOdS0wkunzlMe4YzITpBENGA3hCZCI/s320/l.png';
+ const PORTRAIT_H=0.94; // portrait frame height as fraction of the 16:9 view (must match CSS #portrait height)
+ const logoSpots=[{x:.04,y:.06},{x:.38,y:.06},{x:.72,y:.06},{x:.04,y:.43},{x:.38,y:.43},{x:.72,y:.43},{x:.04,y:.82},{x:.38,y:.82},{x:.72,y:.82}];
+ let stream=null,facing='environment',zoom=1,frameX=.5,recording=false,raf=0,wakeLock=null,timerId=0;
+ let logoSpot=0,logoMotion=true,logoImage=null,logoEnabled=true,gridEnabled=true,fullMode=false;
+ let recL,recP,chunksL=[],chunksP=[],urls=[],recordedFiles=[],landCanvas,portCanvas,landCtx,portCtx,lastRender=0,recStart=0,FPS=30;
+ let pointers=new Map(),initialPinch=0,initialZoom=1;
+ const pref=(k,v)=>{try{localStorage.setItem('bothnow_'+k,String(v))}catch(e){}};
+ const toast=m=>{const t=$('toast');t.textContent=m;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(()=>t.style.display='none',3200)};
+ const setStatus=(s,rec)=>{$('status').textContent=s;$('status').classList.toggle('rec',!!rec)};
+
+ // ---------- format: MP4 first (plays in every gallery), WebM only as fallback ----------
+ function supportedMime(){
+  if(!window.MediaRecorder)return '';
+  return ['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4;codecs=avc1,mp4a.40.2','video/mp4;codecs=h264,aac','video/mp4','video/webm;codecs=h264,opus','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'';
+ }
+ const ext=m=>m&&m.toLowerCase().includes('mp4')?'mp4':'webm';
+ const baseType=m=>(m||'video/webm').split(';')[0];
+
+ // ---------- camera ----------
+ async function startCamera(){
+  try{
+   if(recording)return;
+   if(stream)stream.getTracks().forEach(t=>t.stop());
+   if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia)throw new Error('Camera needs a secure page and WebView camera permission.');
+   stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:facing},width:{ideal:1920},height:{ideal:1080}},audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+   video.srcObject=stream;video.muted=true;video.style.display='block';
+   await video.play();
+   $('placeholder').style.display='none';
+   $('record').disabled=false;
+   setStatus('CAMERA READY');setZoom(1);
+   toast('Camera ready');
+  }catch(e){
+   const msg=e.name==='NotAllowedError'?'Allow Camera and Microphone permission for this app in Android settings.':e.name==='NotFoundError'?'No camera found on this device.':e.name==='NotReadableError'?'Camera is busy. Close other apps using it.':e.message;
+   toast(msg);setStatus('CAMERA ERROR');
+   $('placeholder').querySelector('strong').textContent='Camera not started';
+  }
+ }
+ async function lockScreen(on){
+  try{
+   if(on&&navigator.wakeLock){wakeLock=await navigator.wakeLock.request('screen')}
+   else if(wakeLock){await wakeLock.release();wakeLock=null}
+  }catch(e){}
+ }
+
+ // ---------- UI ----------
+ function applyUI(){
+  grid.style.display=gridEnabled&&!fullMode?'block':'none';
+  portrait.style.display=fullMode?'none':'block';
+  $('gridBtn').textContent='Grid: '+(gridEnabled?'ON':'OFF');
+  $('fullBtn').textContent='Full Mode: '+(fullMode?'ON':'OFF');
+  $('logoBtn').textContent='Logo: '+(logoEnabled?'ON':'OFF');
+  logo.hidden=portraitLogo.hidden=!(logoEnabled&&logoImage);
+  updateLogoPreview();updatePortrait();
+ }
+ function updatePortrait(){portrait.style.left=(frameX*100)+'%';$('zoomLabel').textContent='Zoom '+zoom.toFixed(1)+'×'}
+ function place(el,s){el.style.left=(s.x*100)+'%';el.style.top=(s.y*100)+'%';el.style.right=el.style.bottom='auto'}
+ function updateLogoPreview(){const s=logoSpots[logoSpot];place(logo,s);place(portraitLogo,s);logo.style.width=$('landSize').value+'%';portraitLogo.style.width=$('portSize').value+'%'}
+ function setZoom(z){zoom=Math.max(1,Math.min(4,Number(z)||1));video.style.transform='scale('+zoom+')';$('zoomRange').value=String(zoom);updatePortrait()}
+ setInterval(()=>{if(logoEnabled&&logoImage&&logoMotion){let n=logoSpot;while(n===logoSpot)n=Math.floor(Math.random()*logoSpots.length);logoSpot=n;updateLogoPreview()}},2000);
+
+ // ---------- logo (cached for offline use) ----------
+ function useLogo(src){
+  const img=new Image();img.crossOrigin='anonymous';
+  img.onload=()=>{logoImage=img;logo.src=portraitLogo.src=src;$('brandImg').src=src;$('brandImg').hidden=false;$('brandText').hidden=true;applyUI()};
+  img.onerror=()=>{};
+  img.src=src;
+ }
+ async function loadLogo(){
+  try{
+   const custom=localStorage.getItem(LOGO_KEY);
+   if(custom){useLogo(custom);return}
+   const cached=localStorage.getItem(DEFAULT_CACHE_KEY);
+   if(cached){useLogo(cached);return}
+  }catch(e){}
+  // First run online: download the logo once and store it so the app works offline afterwards.
+  try{
+   const r=await fetch(DEFAULT_LOGO_URL,{mode:'cors'});const b=await r.blob();
+   const data=await new Promise((res,rej)=>{const f=new FileReader();f.onload=()=>res(f.result);f.onerror=rej;f.readAsDataURL(b)});
+   try{localStorage.setItem(DEFAULT_CACHE_KEY,data)}catch(e){}
+   useLogo(data);
+  }catch(e){useLogo(DEFAULT_LOGO_URL)}
+ }
+ function saveLogoFile(file){
+  const rd=new FileReader();
+  rd.onload=()=>{const img=new Image();img.onload=()=>{
+   const sc=Math.min(1,700/Math.max(img.width,img.height)),c=document.createElement('canvas');
+   c.width=Math.max(1,Math.round(img.width*sc));c.height=Math.max(1,Math.round(img.height*sc));
+   c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+   const data=c.toDataURL('image/png');
+   try{localStorage.setItem(LOGO_KEY,data);useLogo(data);toast('Logo saved on this device')}catch(err){toast('Logo too large to save. Try a smaller image.')}
+  };img.onerror=()=>toast('Could not read that image.');img.src=rd.result};
+  rd.readAsDataURL(file);
+ }
+
+ // ---------- drawing (crop math matches what you see on screen) ----------
+ function base(){
+  const vw=video.videoWidth||1920,vh=video.videoHeight||1080;
+  let bw=vw,bh=vh;if(bw/bh>16/9)bw=bh*16/9;else bh=bw*9/16;
+  return{bx:(vw-bw)/2,by:(vh-bh)/2,bw,bh};
+ }
+ function drawFrame(ctx,canvas,isPortrait){
+  const{bx,by,bw,bh}=base();
+  ctx.fillStyle='#000';ctx.fillRect(0,0,canvas.width,canvas.height);
+  if(!isPortrait){
+   const sw=bw/zoom,sh=bh/zoom;
+   ctx.drawImage(video,bx+(bw-sw)/2,by+(bh-sh)/2,sw,sh,0,0,canvas.width,canvas.height);
+  }else{
+   const ch=bh*PORTRAIT_H/zoom,cw=ch*9/16;
+   const fx=.5+(frameX-.5)/zoom;
+   let sx=bx+fx*bw-cw/2,sy=by+bh/2-ch/2;
+   sx=Math.max(bx,Math.min(bx+bw-cw,sx));sy=Math.max(by,Math.min(by+bh-ch,sy));
+   ctx.drawImage(video,sx,sy,cw,ch,0,0,canvas.width,canvas.height);
+  }
+  if(logoEnabled&&logoImage){
+   const pct=Number(isPortrait?$('portSize').value:$('landSize').value)/100;
+   const sc=Math.min(canvas.width*pct/logoImage.width,canvas.height*.2/logoImage.height);
+   const w=logoImage.width*sc,h=logoImage.height*sc,s=logoSpots[logoSpot],pad=canvas.width*.025;
+   ctx.globalAlpha=.9;
+   ctx.drawImage(logoImage,Math.max(pad,Math.min(canvas.width-w-pad,s.x*canvas.width)),Math.max(pad,Math.min(canvas.height-h-pad,s.y*canvas.height)),w,h);
+   ctx.globalAlpha=1;
+  }
+ }
+ function renderLoop(now){
+  if(!recording)return;
+  if(!lastRender||now-lastRender>=1000/FPS-2){drawFrame(landCtx,landCanvas,false);drawFrame(portCtx,portCanvas,true);lastRender=now}
+  raf=requestAnimationFrame(renderLoop);
+ }
+
+ // ---------- recording ----------
+ function tick(){const s=Math.floor((performance.now()-recStart)/1000);setStatus('● REC '+String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'),true)}
+ function startRecord(){
+  if(!stream||recording)return;
+  try{
+   const mime=supportedMime();
+   if(!mime||!HTMLCanvasElement.prototype.captureStream){toast('This device cannot record video here.');return}
+   const mics=stream.getAudioTracks();
+   if(!mics.length){toast('Microphone unavailable. Allow microphone permission and restart the camera.');return}
+   FPS=Number($('fps').value)||30;
+   const hd=$('quality').value==='hd';
+   landCanvas=document.createElement('canvas');portCanvas=document.createElement('canvas');
+   landCanvas.width=hd?1280:960;landCanvas.height=hd?720:540;
+   portCanvas.width=hd?720:540;portCanvas.height=hd?1280:960;
+   landCtx=landCanvas.getContext('2d',{alpha:false});portCtx=portCanvas.getContext('2d',{alpha:false});
+   const ls=landCanvas.captureStream(FPS),ps=portCanvas.captureStream(FPS);
+   mics.forEach(t=>{ls.addTrack(t);ps.addTrack(t)});
+   chunksL=[];chunksP=[];lastRender=0;
+   const vb=hd?3500000:2000000;
+   recL=new MediaRecorder(ls,{mimeType:mime,videoBitsPerSecond:vb,audioBitsPerSecond:128000});
+   recP=new MediaRecorder(ps,{mimeType:mime,videoBitsPerSecond:vb*.85,audioBitsPerSecond:128000});
+   let stopped=0,shown=false;
+   const done=()=>{if(++stopped===2&&!shown){shown=true;[...ls.getVideoTracks(),...ps.getVideoTracks()].forEach(t=>{try{t.stop()}catch(_){}});showResults(mime)}};
+   recL.ondataavailable=e=>{if(e.data&&e.data.size)chunksL.push(e.data)};
+   recP.ondataavailable=e=>{if(e.data&&e.data.size)chunksP.push(e.data)};
+   recL.onerror=recP.onerror=()=>{toast('Recording error. Try SD quality or a lower frame rate.');setStatus('RECORDING ERROR')};
+   recL.onstop=done;recP.onstop=done;
+   drawFrame(landCtx,landCanvas,false);drawFrame(portCtx,portCanvas,true);
+   recL.start(1000);recP.start(1000);
+   recording=true;recStart=performance.now();
+   raf=requestAnimationFrame(renderLoop);
+   timerId=setInterval(tick,500);tick();
+   $('record').textContent='■ Stop';$('record').classList.add('recording');
+   $('switchCamera').disabled=true;lockScreen(true);
+  }catch(e){recording=false;toast('Could not start recording: '+e.message);setStatus('CAMERA READY')}
+ }
+ function stopRecord(){
+  if(!recording)return;
+  recording=false;cancelAnimationFrame(raf);clearInterval(timerId);
+  $('record').disabled=true;$('record').textContent='Saving…';$('record').classList.remove('recording');
+  setStatus('SAVING VIDEOS');
+  [recL,recP].forEach(r=>{try{if(r.state!=='inactive')r.stop()}catch(e){}});
+ }
+
+ // ---------- results & saving ----------
+ function stamp(){const d=new Date(),p=n=>String(n).padStart(2,'0');return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+'-'+p(d.getHours())+p(d.getMinutes())+p(d.getSeconds())}
+ function showResults(mime){
+  try{
+   const type=baseType(mime),e=ext(mime);
+   const b1=new Blob(chunksL,{type}),b2=new Blob(chunksP,{type});
+   if(!b1.size||!b2.size)throw new Error('The recording is empty. Please record again.');
+   urls.forEach(u=>URL.revokeObjectURL(u));
+   urls=[URL.createObjectURL(b1),URL.createObjectURL(b2)];
+   const s=stamp();
+   recordedFiles=[new File([b1],'BothNow-Landscape-'+s+'.'+e,{type}),new File([b2],'BothNow-Portrait-'+s+'.'+e,{type})];
+   $('landPreview').src=urls[0];$('portPreview').src=urls[1];
+   $('landDownload').href=urls[0];$('portDownload').href=urls[1];
+   $('landDownload').download=recordedFiles[0].name;$('portDownload').download=recordedFiles[1].name;
+   $('landDownload').hidden=$('portDownload').hidden=false;
+   $('fmtInfo').textContent='Format: '+e.toUpperCase()+(e==='mp4'?' (gallery-ready)':' — this phone cannot make MP4, so files are WebM (VLC / Google Photos play them)');
+   $('result').style.display='block';$('controls').style.display='none';$('settings').style.display='none';
+   $('record').disabled=false;$('record').textContent='● Record';$('switchCamera').disabled=false;
+   setStatus('TWO VIDEOS READY');lockScreen(false);
+   if(window.BothNowNative)nativeSave(recordedFiles);
+   else if($('autoSave').checked)recordedFiles.forEach((f,i)=>setTimeout(()=>downloadFile(f),i*800));
+  }catch(err){
+   $('record').disabled=false;$('record').textContent='● Record';$('switchCamera').disabled=false;
+   setStatus('SAVE ERROR');toast(err.message);lockScreen(false);
+  }
+ }
+ function downloadFile(f){const a=document.createElement('a');a.href=URL.createObjectURL(f);a.download=f.name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},4000)}
+ const b64=b=>new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result.split(',')[1]);f.readAsDataURL(b)});
+ async function nativeSave(files){
+  const msg=$('saveMessage');let ok=0,n=0;
+  for(const f of files){
+   if(f._saved){ok++;n++;continue}
+   n++;
+   try{
+    if(!window.BothNowNative.begin(f.name,f.type||'video/mp4'))throw 0;
+    for(let o=0;o<f.size;o+=786432)window.BothNowNative.chunk(await b64(f.slice(o,o+786432)));
+    if(window.BothNowNative.finish()){f._saved=true;ok++}
+   }catch(e){try{window.BothNowNative.abort()}catch(_){}}
+  }
+  msg.textContent=ok===n?'Saved to your gallery (Movies > BothNow).':'Some files could not be saved. Tap Save again.';
+  toast(msg.textContent);
+ }
+ async function saveFiles(files){
+  const msg=$('saveMessage');
+  if(window.BothNowNative){await nativeSave(files);return}
+  try{
+   if(navigator.share&&navigator.canShare&&navigator.canShare({files})){
+    await navigator.share({files,title:'BothNow Camera'});
+    msg.textContent='Share menu opened. Choose Gallery / Photos / Files to keep the video.';return;
+   }
+   files.forEach((f,i)=>setTimeout(()=>downloadFile(f),i*800));
+   msg.textContent='Sharing is not available in this app build, so the files were sent to Downloads. Enable Sharing for this HTML section in AppCreator24 for the gallery option.';
+  }catch(e){
+   msg.textContent=e.name==='AbortError'?'Cancelled. Your videos are still here — tap Save again any time.':'Could not open the share menu. Use the Download links below each video.';
+  }
+ }
+ const closeResults=()=>{$('result').style.display='none';$('controls').style.display='flex'};
+
+ // ---------- events ----------
+ $('startCamera').onclick=startCamera;
+ $('record').onclick=()=>recording?stopRecord():startRecord();
+ $('switchCamera').onclick=()=>{facing=facing==='environment'?'user':'environment';startCamera()};
+ $('gridBtn').onclick=()=>{gridEnabled=!gridEnabled;$('gridToggle').checked=gridEnabled;applyUI()};
+ $('fullBtn').onclick=()=>{fullMode=!fullMode;$('fullToggle').checked=fullMode;applyUI()};
+ $('logoBtn').onclick=()=>{logoEnabled=!logoEnabled;$('logoToggle').checked=logoEnabled;pref('logo_enabled',logoEnabled);applyUI()};
+ $('settingsBtn').onclick=()=>{$('settings').style.display='block';$('controls').style.display='none'};
+ $('closeSettings').onclick=()=>{$('settings').style.display='none';$('controls').style.display='flex';applyUI()};
+ $('backResult').onclick=closeResults;
+ $('recordAgain').onclick=()=>{closeResults();setStatus('CAMERA READY')};
+ $('shareBoth').onclick=()=>saveFiles(recordedFiles);
+ $('shareL').onclick=()=>saveFiles([recordedFiles[0]]);
+ $('shareP').onclick=()=>saveFiles([recordedFiles[1]]);
+ $('logoFile').onchange=e=>{const f=e.target.files[0];if(f)saveLogoFile(f)};
+ $('removeLogo').onclick=()=>{try{localStorage.removeItem(LOGO_KEY)}catch(e){}$('logoFile').value='';loadLogo();toast('Default logo restored')};
+ $('zoomIn').onclick=()=>setZoom(zoom+.2);$('zoomOut').onclick=()=>setZoom(zoom-.2);$('zoomReset').onclick=()=>setZoom(1);
+ $('zoomRange').oninput=e=>setZoom(e.target.value);
+ $('logoMotionToggle').onchange=e=>{logoMotion=e.target.checked;pref('logo_motion',logoMotion)};
+ $('logoToggle').onchange=e=>{logoEnabled=e.target.checked;pref('logo_enabled',logoEnabled);applyUI()};
+ $('gridToggle').onchange=e=>{gridEnabled=e.target.checked;applyUI()};
+ $('fullToggle').onchange=e=>{fullMode=e.target.checked;applyUI()};
+ ['quality','fps'].forEach(id=>$(id).onchange=e=>pref(id,e.target.value));
+ $('autoSave').onchange=e=>pref('auto_save',e.target.checked);
+ ['landSize','portSize'].forEach(id=>$(id).oninput=()=>{$(id+'Val').textContent=$(id).value+'%';pref(id,$(id).value);updateLogoPreview()});
+ portrait.addEventListener('pointerdown',e=>{portrait.setPointerCapture(e.pointerId);pointers.set(e.pointerId,1);portrait.dataset.lastX=e.clientX});
+ portrait.addEventListener('pointermove',e=>{
+  if(!pointers.has(e.pointerId))return;
+  const dx=e.clientX-Number(portrait.dataset.lastX||e.clientX);portrait.dataset.lastX=e.clientX;
+  frameX=Math.max(.05,Math.min(.95,frameX+dx/stage.clientWidth));updatePortrait();
+ });
+ ['pointerup','pointercancel'].forEach(ev=>portrait.addEventListener(ev,e=>pointers.delete(e.pointerId)));
+ const dist=t=>Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);
+ stage.addEventListener('touchstart',e=>{if(e.touches.length===2){e.preventDefault();initialPinch=dist(e.touches);initialZoom=zoom}},{passive:false});
+ stage.addEventListener('touchmove',e=>{if(e.touches.length===2){e.preventDefault();if(initialPinch>0)setZoom(initialZoom*dist(e.touches)/initialPinch)}},{passive:false});
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&recording)lockScreen(true)});
+
+ // ---------- restore saved settings, then boot ----------
+ try{
+  const g=k=>localStorage.getItem('bothnow_'+k);
+  if(g('logo_enabled')!==null)logoEnabled=g('logo_enabled')==='true';
+  if(g('logo_motion')!==null)logoMotion=g('logo_motion')==='true';
+  if(g('quality'))$('quality').value=g('quality');
+  if(g('fps'))$('fps').value=g('fps');
+  if(g('auto_save')!==null)$('autoSave').checked=g('auto_save')==='true';
+  $('logoToggle').checked=logoEnabled;$('logoMotionToggle').checked=logoMotion;
+  ['landSize','portSize'].forEach(id=>{const v=g(id);if(v!==null){$(id).value=v;$(id+'Val').textContent=v+'%'}});
+ }catch(e){}
+ applyUI();setZoom(1);loadLogo();
+ window.addEventListener('load',()=>setTimeout(startCamera,250),{once:true});
+})();
+</script>
+</body>
+</html>
