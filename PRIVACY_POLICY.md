@@ -12,10 +12,10 @@ BothNow Camera requests camera access to take photos and record videos. It reque
 Camera and microphone data are used to create the photo or video you request. The app temporarily processes the source recording on your device to create landscape and portrait exports. Photos are saved to `Pictures/BothNow`; finished videos are saved to `Movies/BothNow`. The temporary source recording is deleted after successful export.
 
 ## 3. User-selected watermark
-If you select a logo from your device, the app uses that image to display a live preview and watermark the exported videos. The selected image reference and watermark settings are stored locally on your device until you remove or replace the logo.
+If you select a logo from your device, the app uses that image to display a live preview and watermark exported videos. The selected image reference and watermark settings are stored locally on your device until you remove or replace the logo.
 
-## 4. Collection and sharing
-The app is designed not to transmit camera footage, microphone audio, selected logos, or personal information to the developer. The current app source contains no advertising or analytics SDK. The app does not share media; you choose whether to share saved files through other apps on your device.
+## 4. BothNow Gallery and sharing
+The in-app gallery lists media created by BothNow in its `Pictures/BothNow` and `Movies/BothNow` folders using Android's scoped MediaStore access. You can preview, delete or choose to share a selected file. Sharing is initiated only by you; Android opens the system share interface and the receiving app's own privacy practices then apply. The app is designed not to transmit camera footage, microphone audio, selected logos or personal information to the developer. The source project contains no advertising or analytics SDK.
 
 ## 5. Retention and deletion
 Photos and completed videos remain on your device until you delete them. You can remove your selected watermark in the app. Temporary source recordings are deleted after successful export. If an export fails, a temporary file may remain in app storage until it is cleared by Android or the app is uninstalled.

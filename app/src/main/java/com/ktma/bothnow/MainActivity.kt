@@ -1,6 +1,7 @@
 package com.ktma.bothnow
 import android.Manifest
 import android.content.ContentValues
+import android.content.ContentUris
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -8,9 +9,18 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import kotlin.math.atan2
+import kotlin.math.abs
 import android.view.MotionEvent
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.StatFs
 import android.provider.MediaStore
 import android.view.Gravity
 import android.view.View
@@ -75,6 +85,38 @@ class MainActivity : AppCompatActivity() {
     private lateinit var removeWatermarkButton: Button
     private lateinit var watermarkPositionButton: Button
     private lateinit var exportProgress: ProgressBar
+    private lateinit var exposureSeek: SeekBar
+    private lateinit var exposureLabel: TextView
+    private lateinit var compositionButton: Button
+    private lateinit var timerButton: Button
+    private lateinit var galleryButton: Button
+    private lateinit var recordingInfo: TextView
+    private lateinit var audioMeterView: AudioMeterView
+    private lateinit var audioMeterLabel: TextView
+    private lateinit var horizonButton: Button
+    private var horizonEnabled = true
+    private var horizonRollDegrees = 0f
+    private var sensorManager: SensorManager? = null
+    private var accelerometer: Sensor? = null
+    private val levelSensorListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            if (event.sensor.type == Sensor.TYPE_ACCELEROMETER && event.values.size >= 3) {
+                val x = event.values[0]; val y = event.values[1]; val z = event.values[2]
+                val measured = Math.toDegrees(atan2(x.toDouble(), z.toDouble())).toFloat()
+                horizonRollDegrees = horizonRollDegrees * 0.82f + measured * 0.18f
+                if (::frameGuideView.isInitialized) frameGuideView.invalidate()
+            }
+        }
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+    private lateinit var teleprompterText: TextView
+    private lateinit var teleprompterScroll: ScrollView
+    private lateinit var teleprompterStatus: TextView
+    private lateinit var teleprompterToggleButton: Button
+    private var teleprompterRunning = false
+    private var teleprompterSpeed = 2
+    private var teleprompterOffset = 0
+    private var teleprompterTicker: Runnable? = null
     private lateinit var cameraExecutor: java.util.concurrent.ExecutorService
 
     private var cameraProvider: ProcessCameraProvider? = null
@@ -100,6 +142,18 @@ class MainActivity : AppCompatActivity() {
     private var activeWatermarkFormat = "LANDSCAPE"
     private var watermarkPosition = 0
     private var currentZoomRatio = 1f
+    private var compositionMode = 1 // 0 off, 1 rule of thirds, 2 centre crosshair
+    private val timerOptions = listOf(0, 3, 5, 10)
+    private var photoTimerSeconds = 0
+    private var countdownRemaining = 0
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var recordingStartedAt = 0L
+    private var exposureMinIndex = 0
+    private var exposureMaxIndex = 0
+    private var photoCountdownRunnable: Runnable? = null
+    private var recordingTicker: Runnable? = null
+
+    private data class GalleryItem(val uri: Uri, val name: String, val mime: String, val dateAdded: Long)
 
     private data class ExportSpec(val label: String, val width: Int, val height: Int)
 
@@ -144,6 +198,8 @@ class MainActivity : AppCompatActivity() {
         watermarkPosition = prefs.getInt("watermark_position", 0).coerceIn(-1, positions.lastIndex)
         portraitCenterX = prefs.getFloat("portrait_center_x", 0.5f)
         portraitCenterY = prefs.getFloat("portrait_center_y", 0.5f)
+        compositionMode = prefs.getInt("composition_mode", 1).coerceIn(0, 2)
+        photoTimerSeconds = prefs.getInt("photo_timer_seconds", 0).let { if (it in timerOptions) it else 0 }
         buildInterface()
         if (hasCameraPermission()) startCamera() else showPermissionDisclosure()
     }
@@ -172,6 +228,24 @@ class MainActivity : AppCompatActivity() {
         portraitWatermarkView = createLiveLogoView("PORTRAIT")
         cameraStage.addView(landscapeWatermarkView)
         cameraStage.addView(portraitWatermarkView)
+        teleprompterText = TextView(this).apply {
+            text = prefs.getString("teleprompter_script", "Your script will appear here")
+            setTextColor(android.graphics.Color.WHITE)
+            textSize = 23f
+            gravity = Gravity.CENTER
+            setPadding(dp(16), dp(24), dp(16), dp(24))
+            setShadowLayer(4f, 1f, 2f, android.graphics.Color.BLACK)
+        }
+        teleprompterScroll = ScrollView(this).apply {
+            visibility = View.GONE
+            isFillViewport = true
+            setBackgroundColor(0x99070b18.toInt())
+            addView(teleprompterText, ScrollView.LayoutParams(-1, -2))
+        }
+        val prompterParams = FrameLayout.LayoutParams(-1, dp(138), Gravity.TOP).apply {
+            leftMargin = dp(18); rightMargin = dp(18); topMargin = dp(12)
+        }
+        cameraStage.addView(teleprompterScroll, prompterParams)
         cameraStage.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             frameGuideView.invalidate()
             if (::landscapeWatermarkView.isInitialized) {
@@ -194,6 +268,20 @@ class MainActivity : AppCompatActivity() {
         val frameCenterButton = makeButton("Center portrait frame") { portraitCenterX = 0.5f; portraitCenterY = 0.5f; prefs.edit().putFloat("portrait_center_x", portraitCenterX).putFloat("portrait_center_y", portraitCenterY).apply(); frameGuideView.invalidate() }
         root.addView(frameCenterButton, LinearLayout.LayoutParams(-1, dp(36)))
 
+        val compositionAndTimer = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        compositionButton = makeButton("Guide: Thirds") { cycleCompositionGuide() }
+        timerButton = makeButton("Photo timer: OFF") { cyclePhotoTimer() }
+        compositionAndTimer.addView(compositionButton, LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginEnd = dp(5) })
+        compositionAndTimer.addView(timerButton, LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginStart = dp(5) })
+        horizonButton = makeButton("Horizon: ON") {
+            horizonEnabled = !horizonEnabled
+            horizonButton.text = if (horizonEnabled) "Horizon: ON" else "Horizon: OFF"
+            frameGuideView.invalidate()
+        }
+        compositionAndTimer.addView(horizonButton, LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginStart = dp(5) })
+        root.addView(compositionAndTimer)
+        updateCompositionAndTimerLabels()
+
         val zoomLabel = TextView(this).apply { text = "ZOOM"; textSize = 11f; setTextColor(-1) }
         root.addView(zoomLabel)
         zoomSeek = SeekBar(this).apply { max = 100; progress = 0; setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -205,6 +293,22 @@ class MainActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         }) }
         root.addView(zoomSeek, LinearLayout.LayoutParams(-1, dp(32)))
+
+        exposureLabel = TextView(this).apply { text = "EXPOSURE · 0.0 EV"; textSize = 11f; setTextColor(-1) }
+        root.addView(exposureLabel)
+        exposureSeek = SeekBar(this).apply {
+            max = 100; progress = 50
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (fromUser) applyExposureFromProgress(progress)
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+        }
+        root.addView(exposureSeek, LinearLayout.LayoutParams(-1, dp(32)))
+        val exposureReset = makeButton("Reset exposure") { setExposureIndex(0) }
+        root.addView(exposureReset, LinearLayout.LayoutParams(-1, dp(34)))
 
         val tools = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         flashButton = makeButton("Flash off") { toggleTorch() }
@@ -220,6 +324,52 @@ class MainActivity : AppCompatActivity() {
         actions.addView(captureButton, LinearLayout.LayoutParams(0, dp(52), 0.75f).apply { marginEnd = dp(5); topMargin = dp(7) })
         actions.addView(videoButton, LinearLayout.LayoutParams(0, dp(52), 1.5f).apply { marginStart = dp(5); topMargin = dp(7) })
         root.addView(actions)
+        recordingInfo = TextView(this).apply { text = "READY · STORAGE CHECK ENABLED"; textSize = 10f; gravity = Gravity.CENTER; setTextColor(0xffb8c2df.toInt()); setPadding(0, dp(4), 0, dp(4)) }
+        root.addView(recordingInfo)
+        audioMeterLabel = TextView(this).apply {
+            text = "MIC INPUT · LEVEL METER ACTIVE DURING RECORDING · PEAK ALERT AT 85%"
+            textSize = 9f; gravity = Gravity.CENTER; setTextColor(0xffb8c2df.toInt()); setPadding(0, dp(2), 0, dp(2))
+        }
+        root.addView(audioMeterLabel)
+        audioMeterView = AudioMeterView()
+        root.addView(audioMeterView, LinearLayout.LayoutParams(-1, dp(18)).apply { bottomMargin = dp(5) })
+
+        val prompterTitle = TextView(this).apply {
+            text = "TELEPROMPTER · READ WHILE RECORDING"
+            textSize = 12f; typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(0xff00d9ff.toInt()); setPadding(0, dp(10), 0, dp(4))
+        }
+        root.addView(prompterTitle)
+        val prompterActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        val editScriptButton = makeButton("Edit script") { editTeleprompterScript() }
+        teleprompterToggleButton = makeButton("Start scrolling") { toggleTeleprompter() }
+        val resetScriptButton = makeButton("Reset") { resetTeleprompter() }
+        val hideScriptButton = makeButton("Hide") { stopTeleprompter(); teleprompterScroll.visibility = View.GONE }
+        prompterActions.addView(editScriptButton, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(4) })
+        prompterActions.addView(teleprompterToggleButton, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(4); marginEnd = dp(4) })
+        prompterActions.addView(resetScriptButton, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(4); marginEnd = dp(4) })
+        prompterActions.addView(hideScriptButton, LinearLayout.LayoutParams(0, dp(42), 0.7f).apply { marginStart = dp(4) })
+        root.addView(prompterActions)
+        teleprompterStatus = TextView(this).apply {
+            text = "Script is private to this device · Not burned into exported videos"
+            textSize = 10f; setTextColor(0xffb8c2df.toInt()); gravity = Gravity.CENTER
+        }
+        root.addView(teleprompterStatus)
+        val speedLabel = TextView(this).apply { text = "SCROLL SPEED"; textSize = 10f; setTextColor(-1) }
+        root.addView(speedLabel)
+        val speedSeek = SeekBar(this).apply {
+            max = 4; progress = teleprompterSpeed
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (fromUser) teleprompterSpeed = progress.coerceIn(0, 4)
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+        }
+        root.addView(speedSeek, LinearLayout.LayoutParams(-1, dp(30)))
+        galleryButton = makeButton("Open BothNow Gallery · Preview / Share / Delete") { openBothNowGallery() }
+        root.addView(galleryButton, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(4) })
 
         val settingsTitle = TextView(this).apply { text = "INDEPENDENT WATERMARK SETTINGS"; textSize = 12f; typeface = android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xff00d9ff.toInt()); setPadding(0, dp(10), 0, dp(4)) }
         root.addView(settingsTitle)
@@ -292,6 +442,189 @@ class MainActivity : AppCompatActivity() {
         }
         ViewCompat.requestApplyInsets(scrollContainer)
         updateLiveWatermark()
+    }
+
+    private fun editTeleprompterScript() {
+        val editor = EditText(this).apply {
+            setText(prefs.getString("teleprompter_script", ""))
+            hint = "Paste or type your presentation script here"
+            minLines = 6
+            maxLines = 12
+            gravity = Gravity.TOP or Gravity.START
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        }
+        val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0); addView(editor, LinearLayout.LayoutParams(-1, dp(220))) }
+        AlertDialog.Builder(this)
+            .setTitle("BothNow Teleprompter Script")
+            .setView(container)
+            .setNegativeButton("Cancel", null)
+            .setNeutralButton("Clear") { _, _ ->
+                prefs.edit().remove("teleprompter_script").apply()
+                teleprompterText.text = "Your script will appear here"
+                resetTeleprompter()
+            }
+            .setPositiveButton("Save script") { _, _ ->
+                val script = editor.text.toString().trim()
+                prefs.edit().putString("teleprompter_script", script).apply()
+                teleprompterText.text = script.ifBlank { "Your script will appear here" }
+                resetTeleprompter()
+                teleprompterStatus.text = "SCRIPT SAVED · ${script.length} CHARACTERS"
+            }.show()
+    }
+
+    private fun toggleTeleprompter() {
+        if (teleprompterRunning) {
+            stopTeleprompter()
+            return
+        }
+        if (teleprompterText.text.isNullOrBlank() || teleprompterText.text == "Your script will appear here") {
+            editTeleprompterScript()
+            return
+        }
+        teleprompterScroll.visibility = View.VISIBLE
+        teleprompterRunning = true
+        if (::teleprompterToggleButton.isInitialized) teleprompterToggleButton.text = "Pause"
+        teleprompterStatus.text = "TELEPROMPTER RUNNING · SCRIPT IS NOT RECORDED INTO VIDEO"
+        val tick = object : Runnable {
+            override fun run() {
+                if (!teleprompterRunning) return
+                val maxScroll = (teleprompterText.height - teleprompterScroll.height).coerceAtLeast(0)
+                teleprompterOffset = (teleprompterOffset + teleprompterSpeed + 1).coerceAtMost(maxScroll)
+                teleprompterScroll.scrollTo(0, teleprompterOffset)
+                if (teleprompterOffset >= maxScroll && maxScroll > 0) {
+                    stopTeleprompter()
+                } else {
+                    mainHandler.postDelayed(this, 45L)
+                }
+            }
+        }
+        teleprompterTicker = tick
+        mainHandler.post(tick)
+    }
+
+    private fun stopTeleprompter() {
+        teleprompterRunning = false
+        if (::teleprompterToggleButton.isInitialized) teleprompterToggleButton.text = "Resume scrolling"
+        teleprompterTicker?.let { mainHandler.removeCallbacks(it) }
+        teleprompterTicker = null
+        if (::teleprompterStatus.isInitialized) teleprompterStatus.text = "TELEPROMPTER PAUSED · SCRIPT IS NOT RECORDED INTO VIDEO"
+    }
+
+    private fun resetTeleprompter() {
+        stopTeleprompter()
+        teleprompterOffset = 0
+        if (::teleprompterScroll.isInitialized) teleprompterScroll.scrollTo(0, 0)
+    }
+
+    private fun cycleCompositionGuide() {
+        compositionMode = (compositionMode + 1) % 3
+        prefs.edit().putInt("composition_mode", compositionMode).apply()
+        frameGuideView.invalidate()
+        updateCompositionAndTimerLabels()
+    }
+
+    private fun cyclePhotoTimer() {
+        val index = timerOptions.indexOf(photoTimerSeconds).coerceAtLeast(0)
+        photoTimerSeconds = timerOptions[(index + 1) % timerOptions.size]
+        prefs.edit().putInt("photo_timer_seconds", photoTimerSeconds).apply()
+        updateCompositionAndTimerLabels()
+    }
+
+    private fun updateCompositionAndTimerLabels() {
+        if (::compositionButton.isInitialized) compositionButton.text = "Guide: ${when (compositionMode) { 0 -> "OFF"; 1 -> "Thirds"; else -> "Centre" }}"
+        if (::timerButton.isInitialized) timerButton.text = "Photo timer: ${if (photoTimerSeconds == 0) "OFF" else "${photoTimerSeconds}s"}"
+    }
+
+    private fun applyExposureFromProgress(progress: Int) {
+        if (exposureMaxIndex <= exposureMinIndex) return
+        val index = exposureMinIndex + ((exposureMaxIndex - exposureMinIndex) * progress / 100f).toInt()
+        setExposureIndex(index)
+    }
+
+    private fun setExposureIndex(index: Int) {
+        val active = camera ?: return
+        val clamped = index.coerceIn(exposureMinIndex, exposureMaxIndex)
+        active.cameraControl.setExposureCompensationIndex(clamped)
+        val range = exposureMaxIndex - exposureMinIndex
+        if (range > 0 && ::exposureSeek.isInitialized) exposureSeek.progress = (((clamped - exposureMinIndex).toFloat() / range) * 100f).toInt()
+        updateExposureLabel(clamped)
+    }
+
+    private fun updateExposureLabel(index: Int) {
+        val step = camera?.cameraInfo?.exposureState?.exposureCompensationStep?.toFloat() ?: 0f
+        val ev = index * step
+        if (::exposureLabel.isInitialized) exposureLabel.text = "EXPOSURE · ${if (ev >= 0) "+" else ""}${String.format(Locale.US, "%.1f", ev)} EV"
+    }
+
+    private fun startRecordingTicker() {
+        stopRecordingTicker()
+        val ticker = object : Runnable {
+            override fun run() {
+                if (!isRecording) return
+                val seconds = ((android.os.SystemClock.elapsedRealtime() - recordingStartedAt) / 1000L).toInt()
+                val mm = seconds / 60
+                val ss = seconds % 60
+                recordingInfo.text = "● RECORDING ${String.format(Locale.US, "%02d:%02d", mm, ss)}"
+                mainHandler.postDelayed(this, 500L)
+            }
+        }
+        recordingTicker = ticker
+        mainHandler.post(ticker)
+    }
+
+    private fun stopRecordingTicker() {
+        recordingTicker?.let { mainHandler.removeCallbacks(it) }
+        recordingTicker = null
+        if (::recordingInfo.isInitialized) recordingInfo.text = "READY · STORAGE CHECK ENABLED"
+    }
+
+    private fun openBothNowGallery() {
+        val items = mutableListOf<GalleryItem>()
+        fun collect(collection: Uri, relativePath: String) {
+            val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.MIME_TYPE, MediaStore.MediaColumns.DATE_ADDED)
+            contentResolver.query(collection, projection, "${MediaStore.MediaColumns.RELATIVE_PATH}=?", arrayOf(relativePath), "${MediaStore.MediaColumns.DATE_ADDED} DESC")?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
+                val dateCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idCol)
+                    items.add(GalleryItem(ContentUris.withAppendedId(collection, id), cursor.getString(nameCol) ?: "BothNow media", cursor.getString(mimeCol) ?: "application/octet-stream", cursor.getLong(dateCol)))
+                }
+            }
+        }
+        try {
+            collect(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, "Movies/BothNow/")
+            collect(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "Pictures/BothNow/")
+            items.sortByDescending { it.dateAdded }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Could not read BothNow gallery: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (items.isEmpty()) {
+            AlertDialog.Builder(this).setTitle("BothNow Gallery").setMessage("No BothNow photos or videos yet. Capture a photo or record a video to see it here.").setPositiveButton("Close", null).show()
+            return
+        }
+        val labels = items.map { it.name }.toTypedArray()
+        AlertDialog.Builder(this).setTitle("BothNow Gallery · ${items.size} items").setItems(labels) { _, which -> showGalleryItemActions(items[which]) }.setNegativeButton("Close", null).show()
+    }
+
+    private fun showGalleryItemActions(item: GalleryItem) {
+        AlertDialog.Builder(this).setTitle(item.name).setItems(arrayOf("Preview", "Share", "Delete", "Cancel")) { _, which ->
+            when (which) {
+                0 -> try { startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(item.uri, item.mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)) }
+                    catch (_: Exception) { Toast.makeText(this, "No compatible app found to preview this file", Toast.LENGTH_LONG).show() }
+                1 -> {
+                    val share = Intent(Intent.ACTION_SEND).setType(item.mime).putExtra(Intent.EXTRA_STREAM, item.uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    startActivity(Intent.createChooser(share, "Share with"))
+                }
+                2 -> AlertDialog.Builder(this).setTitle("Delete ${item.name}?").setMessage("This permanently deletes this file from your device.")
+                    .setNegativeButton("Cancel", null).setPositiveButton("Delete") { _, _ ->
+                        val deleted = contentResolver.delete(item.uri, null, null)
+                        Toast.makeText(this, if (deleted > 0) "Deleted" else "Could not delete this file", Toast.LENGTH_SHORT).show()
+                    }.show()
+            }
+        }.show()
     }
 
     private fun watermarkKey(suffix: String, format: String = activeWatermarkFormat) =
@@ -485,6 +818,14 @@ class MainActivity : AppCompatActivity() {
             maxZoom = camera?.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 1f
             currentZoomRatio = 1f
             zoomSeek.progress = 0; torchEnabled = false
+            val exposureRange = camera?.cameraInfo?.exposureState?.exposureCompensationRange
+            exposureMinIndex = exposureRange?.lower ?: 0
+            exposureMaxIndex = exposureRange?.upper ?: 0
+            exposureSeek.isEnabled = exposureMinIndex != exposureMaxIndex
+            exposureSeek.progress = if (exposureMaxIndex > exposureMinIndex) {
+                (((0 - exposureMinIndex).toFloat() / (exposureMaxIndex - exposureMinIndex)) * 100f).toInt().coerceIn(0, 100)
+            } else 50
+            updateExposureLabel(0)
             flashButton.text = if (camera?.cameraInfo?.hasFlashUnit() == true) "Flash off" else "No flash"
             flashButton.isEnabled = camera?.cameraInfo?.hasFlashUnit() == true
             showStatus(if (lensFacing == CameraSelector.LENS_FACING_BACK) "BACK CAMERA READY" else "FRONT CAMERA READY")
@@ -492,6 +833,36 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun takePhoto() {
+        if (photoTimerSeconds > 0) {
+            beginPhotoCountdown()
+            return
+        }
+        capturePhotoNow()
+    }
+
+    private fun beginPhotoCountdown() {
+        photoCountdownRunnable?.let { mainHandler.removeCallbacks(it) }
+        countdownRemaining = photoTimerSeconds
+        captureButton.isEnabled = false
+        val countdown = object : Runnable {
+            override fun run() {
+                if (countdownRemaining <= 0) {
+                    captureButton.isEnabled = true
+                    photoCountdownRunnable = null
+                    capturePhotoNow()
+                } else {
+                    showStatus("PHOTO IN $countdownRemaining…")
+                    recordingInfo.text = "PHOTO TIMER · $countdownRemaining"
+                    countdownRemaining--
+                    mainHandler.postDelayed(this, 1000L)
+                }
+            }
+        }
+        photoCountdownRunnable = countdown
+        mainHandler.post(countdown)
+    }
+
+    private fun capturePhotoNow() {
         val capture = imageCapture ?: run { showStatus("CAMERA NOT READY"); return }
         val name = "BothNow-${timestamp()}.jpg"
         val values = ContentValues().apply { put(MediaStore.Images.Media.DISPLAY_NAME, name); put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg"); put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/BothNow") }
@@ -511,6 +882,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startVideoRecording(withAudio: Boolean) {
+        val availableBytes = StatFs(filesDir.absolutePath).availableBytes
+        if (availableBytes < 250L * 1024L * 1024L) {
+            AlertDialog.Builder(this).setTitle("Low storage space")
+                .setMessage("Less than 250 MB is available. Dual-format recording and export may fail. Free some storage before recording.")
+                .setPositiveButton("Continue anyway") { _, _ -> startVideoRecordingAfterStorageCheck(withAudio) }
+                .setNegativeButton("Cancel", null).show()
+            return
+        }
+        startVideoRecordingAfterStorageCheck(withAudio)
+    }
+
+    private fun startVideoRecordingAfterStorageCheck(withAudio: Boolean) {
         val capture = videoCapture ?: run { showStatus("CAMERA NOT READY"); return }
         val raw = File(cacheDir, "BothNow_source_${timestamp()}.mp4")
         sourceVideo = raw
@@ -519,10 +902,25 @@ class MainActivity : AppCompatActivity() {
         if (withAudio) pending = pending.withAudioEnabled()
         recording = pending.start(ContextCompat.getMainExecutor(this)) { event ->
             when (event) {
-                is VideoRecordEvent.Start -> { isRecording = true; videoButton.text = "■  STOP RECORDING"; showStatus(if (withAudio) "RECORDING MASTER + AUDIO" else "RECORDING MASTER · NO AUDIO") }
-                is VideoRecordEvent.Status -> { /* CameraX recording continues on its own executor. */ }
+                is VideoRecordEvent.Start -> {
+                    isRecording = true; recordingStartedAt = android.os.SystemClock.elapsedRealtime()
+                    videoButton.text = "■  STOP RECORDING"
+                    showStatus(if (withAudio) "RECORDING MASTER + AUDIO" else "RECORDING MASTER · NO AUDIO")
+                    startRecordingTicker()
+                }
+                is VideoRecordEvent.Status -> {
+                    val audioStats = event.recordingStats.audioStats
+                    val amplitude = audioStats.audioAmplitude.toFloat().coerceIn(0f, 1f)
+                    audioMeterView.setAmplitude(amplitude)
+                    audioMeterLabel.text = if (withAudio && audioStats.audioState == androidx.camera.video.AudioStats.AUDIO_STATE_ACTIVE) {
+                        if (amplitude >= 0.85f) "AUDIO PEAK · LOWER INPUT LEVEL · ${(amplitude * 100).toInt()}%"
+                        else "MIC LIVE · ${(amplitude * 100).toInt()}% · GREEN / YELLOW / RED"
+                    } else if (withAudio) "MIC NOT ACTIVE · CHECK MICROPHONE PERMISSION / OTHER APPS"
+                    else "VIDEO ONLY · MICROPHONE NOT ENABLED"
+                }
                 is VideoRecordEvent.Finalize -> {
-                    isRecording = false; recording = null; videoButton.text = "●  RECORD BOTH FORMATS"
+                    isRecording = false; recording = null; audioMeterView.setAmplitude(0f); audioMeterLabel.text = "MIC INPUT · LEVEL METER ACTIVE DURING RECORDING · PEAK ALERT AT 85%"; videoButton.text = "●  RECORD BOTH FORMATS"
+                    stopRecordingTicker()
                     if (event.hasError()) { showStatus("RECORDING ERROR: ${event.error}"); raw.delete() }
                     else { showStatus("RECORDING COMPLETE · PREPARING TWO FORMATS"); beginDualExport(raw) }
                 }
@@ -680,6 +1078,26 @@ This policy may be updated when app functionality changes. For privacy questions
         showStatus("FOCUSING…")
     }
 
+    private inner class AudioMeterView : View(this@MainActivity) {
+        private val barPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private var amplitude = 0f
+        fun setAmplitude(value: Float) { amplitude = value.coerceIn(0f, 1f); invalidate() }
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val w = width.toFloat(); val h = height.toFloat()
+            barPaint.color = 0xff26304b.toInt(); canvas.drawRoundRect(0f, 0f, w, h, h / 2, h / 2, barPaint)
+            val segments = 30; val gap = dp(2).toFloat(); val segmentW = (w - gap * (segments - 1)) / segments
+            val lit = (amplitude * segments).toInt()
+            for (i in 0 until segments) {
+                barPaint.color = when { i < 22 -> 0xff20d080.toInt(); i < 27 -> 0xffffc857.toInt(); else -> 0xffff4058.toInt() }
+                if (i >= lit) barPaint.alpha = 65 else barPaint.alpha = 255
+                val left = i * (segmentW + gap)
+                canvas.drawRoundRect(left, 0f, left + segmentW, h, h / 2, h / 2, barPaint)
+            }
+            barPaint.alpha = 255
+        }
+    }
+
     private inner class FrameGuideView : View(this@MainActivity) {
         private val landscapePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xff00d9ff.toInt(); style = Paint.Style.STROKE; strokeWidth = dp(2).toFloat() }
         private val portraitPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xffffc857.toInt(); style = Paint.Style.STROKE; strokeWidth = dp(2).toFloat(); pathEffect = android.graphics.DashPathEffect(floatArrayOf(dp(8).toFloat(), dp(5).toFloat()), 0f) }
@@ -733,6 +1151,41 @@ This policy may be updated when app functionality changes. For privacy questions
             val portrait = calculatePortraitRect()
             portraitGuideRect = portrait
             canvas.drawRoundRect(portrait, dp(5).toFloat(), dp(5).toFloat(), portraitPaint)
+            if (horizonEnabled && width > 0 && height > 0) {
+                val horizonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = if (abs(horizonRollDegrees) < 2.0f) 0xff20e080.toInt() else 0xffffc857.toInt()
+                    strokeWidth = dp(2).toFloat(); style = Paint.Style.STROKE
+                    setShadowLayer(3f, 1f, 1f, android.graphics.Color.BLACK)
+                }
+                val cx = width / 2f; val cy = height * 0.78f
+                val half = width * 0.16f
+                val angle = Math.toRadians((-horizonRollDegrees).toDouble())
+                val dx = (half * kotlin.math.cos(angle)).toFloat()
+                val dy = (half * kotlin.math.sin(angle)).toFloat()
+                canvas.drawLine(cx - dx, cy - dy, cx + dx, cy + dy, horizonPaint)
+                canvas.drawCircle(cx, cy, dp(4).toFloat(), horizonPaint)
+                canvas.drawText("LEVEL ${String.format(Locale.US, "%.1f", horizonRollDegrees)}°", cx + dp(8), cy - dp(8).toFloat(), labelPaint)
+            }
+            if (compositionMode != 0) {
+                val guidePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x88ffffff.toInt(); style = Paint.Style.STROKE; strokeWidth = dp(1).toFloat(); pathEffect = android.graphics.DashPathEffect(floatArrayOf(dp(4).toFloat(), dp(4).toFloat()), 0f) }
+                if (compositionMode == 1) {
+                    for (fraction in listOf(1f / 3f, 2f / 3f)) {
+                        val gx = lx + landscapeW * fraction
+                        val gy = ly + landscapeH * fraction
+                        canvas.drawLine(gx, ly, gx, ly + landscapeH, guidePaint)
+                        canvas.drawLine(lx, gy, lx + landscapeW, gy, guidePaint)
+                        val px = portrait.left + portrait.width() * fraction
+                        val py = portrait.top + portrait.height() * fraction
+                        canvas.drawLine(px, portrait.top, px, portrait.bottom, guidePaint)
+                        canvas.drawLine(portrait.left, py, portrait.right, py, guidePaint)
+                    }
+                } else {
+                    canvas.drawLine(lx + landscapeW / 2f, ly, lx + landscapeW / 2f, ly + landscapeH, guidePaint)
+                    canvas.drawLine(lx, ly + landscapeH / 2f, lx + landscapeW, ly + landscapeH / 2f, guidePaint)
+                    canvas.drawLine(portrait.centerX(), portrait.top, portrait.centerX(), portrait.bottom, guidePaint)
+                    canvas.drawLine(portrait.left, portrait.centerY(), portrait.right, portrait.centerY(), guidePaint)
+                }
+            }
             canvas.drawText("LANDSCAPE 16:9", lx + dp(5), (ly + dp(14)).coerceAtMost(height - dp(4).toFloat()), labelPaint)
             canvas.drawText("PORTRAIT 9:16 · DRAG", portrait.left + dp(4), (portrait.top + dp(14)).coerceAtMost(height - dp(4).toFloat()), labelPaint)
             canvas.drawCircle(portrait.centerX(), portrait.centerY(), dp(4).toFloat(), portraitPaint)
@@ -817,7 +1270,21 @@ This policy may be updated when app functionality changes. For privacy questions
     private fun showStatus(message: String) { if (::status.isInitialized) status.text = message }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
+    override fun onResume() {
+        super.onResume()
+        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        accelerometer?.let { sensorManager?.registerListener(levelSensorListener, it, SensorManager.SENSOR_DELAY_UI) }
+    }
+
+    override fun onPause() {
+        sensorManager?.unregisterListener(levelSensorListener)
+        super.onPause()
+    }
+
     override fun onDestroy() {
+        photoCountdownRunnable?.let { mainHandler.removeCallbacks(it) }
+        stopRecordingTicker()
         if (isRecording) recording?.stop()
         activeTransformer?.cancel()
         cameraProvider?.unbindAll()

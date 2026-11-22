@@ -1,45 +1,51 @@
-BothNow Camera 2.2 — Dual-format native Android camera app
+BothNow Camera 3.1 Broadcast & Studio Edition — native Android dual-format camera
+
+## Product editions combined
+Professional camera controls, broadcast composition tools and creator media workflows in one app.
 
 ## Features
-- Native CameraX camera preview, photo capture, front/rear camera, torch, zoom and tap-to-focus.
-- Live 16:9 landscape and 9:16 portrait framing guides.
-- Drag the portrait guide to change the portrait crop position. Tap outside the guide to focus.
-- Record one source video once, then export Landscape 1920×1080 and Portrait 1080×1920 MP4 files.
-- Upload one PNG/JPG/WEBP logo and display two independent live watermark previews: one inside the landscape frame and one inside the portrait frame.
-- Configure portrait and landscape watermark position, size and opacity independently; drag either preview logo to position it.
-- Pinch the camera preview to zoom, or use the zoom slider. Tap to focus.
-- Videos save to Movies/BothNow; photos save to Pictures/BothNow.
+- Live CameraX microphone VU meter during recording, with green/yellow/red segments and an audio peak warning at 85% amplitude. The meter uses CameraX recording audio statistics and does not open a second microphone capture session.
+- Accelerometer-based electronic horizon with live roll angle and on/off control.
+- Recording state, elapsed time, microphone-enabled state and live audio level/peak feedback.
+- Native CameraX camera preview, photo capture, front/rear camera, torch, tap-to-focus and zoom slider/pinch zoom.
+- Exposure compensation slider using the active camera hardware's supported range; unavailable ranges disable the control.
+- 16:9 landscape and 9:16 portrait framing guides; move the portrait guide to set the portrait crop.
+- Composition overlays: rule of thirds, centre crosshair or off.
+- Photo self-timer: off, 3, 5 or 10 seconds.
+- One source video exported as Landscape 1920x1080 and Portrait 1080x1920 MP4 files.
+- Recording elapsed-time display and low-storage warning before recording.
+- Upload one PNG/JPG/WEBP logo and show independent landscape and portrait live watermark previews. Configure position, size and opacity separately.
+- BothNow Gallery lists media saved in Pictures/BothNow and Movies/BothNow, with preview, user-initiated share and delete actions.
 - In-app privacy policy and developer contact details.
 
 ## Build configuration
-- Application ID: `com.ktma.bothnow` (keep this unchanged to update the existing app).
-- Version 2.2, versionCode 4.
+- Application ID: com.ktma.bothnow (unchanged).
+- Version 3.1, versionCode 7.
 - compileSdk 36 / targetSdk 36 / minSdk 29.
 - Android Gradle Plugin 8.10.1, Gradle 8.13, Kotlin 2.2.20, Java 17.
 - CameraX 1.4.2 and AndroidX Media3 1.6.1.
 
 ## Build APK using GitHub Actions
-1. Extract the ZIP.
-2. Open your existing GitHub repository.
-3. Upload/replace the repository files with the CONTENTS of the `BothNowCamera-main` folder. Do not create an extra nested `BothNowCamera-main/BothNowCamera-main` folder.
-4. Commit the changes to your main branch.
-5. Open the repository's Actions tab and select the latest **Build APK** run.
-6. Wait for the workflow to finish successfully. Download the `BothNowCamera-APK` artifact and install the APK on your Android phone.
+1. Extract this ZIP.
+2. Open the existing GitHub repository.
+3. Upload/replace the repository files with the CONTENTS of the BothNowCamera-main folder. Do not create a nested duplicate folder.
+4. Confirm .github/workflows/build.yml is present at that exact path.
+5. Commit the changes.
+6. Open Actions, select the latest Build APK run and wait for success.
+7. Download the BothNowCamera-APK artifact and extract app-debug.apk.
 
-The APK produced by this workflow is a debug/testing build. It is not the signed release App Bundle needed for a normal Google Play production submission. GitHub-hosted runners generate a temporary debug signing key, so an APK from a later run may not install over an earlier debug APK. If Android reports a signature conflict, uninstall the old app before installing the new debug APK (this clears its local settings/media permissions). For an in-place production update, use the same protected release/upload signing key for every release; never commit the keystore or passwords to GitHub.
+The workflow builds a debug/testing APK. It is not a signed release Android App Bundle for Google Play. GitHub Actions debug signing may use a different key on a later run, so Android may reject an update over a previously installed debug APK. Preserve the existing app and its data until you have confirmed signing compatibility. For production updates, protect and reuse the same release signing key; never commit a keystore or passwords to GitHub.
 
-## Privacy policy and Play Store
-- In-app privacy policy: available from the camera screen.
-- Website privacy policy source: `docs/privacy-policy.html`.
-- Suggested public URL once hosted on your website: `https://www.ktmaonline.com/privacy-policy/bothnow-camera/`.
-- Store release steps and Data safety guidance: `docs/PLAY_STORE_RELEASE_CHECKLIST.md`.
-
-Before using the suggested URL in Play Console, publish the HTML policy on your website and verify the page is publicly accessible over HTTPS. Review the policy against the final app and any future SDK or feature changes.
+## Privacy and Play Store
+- In-app privacy policy is available from the camera screen.
+- Website policy source: docs/privacy-policy.html. Publish it on your website and verify public HTTPS access before entering its URL in Play Console.
+- Review docs/PLAY_STORE_RELEASE_CHECKLIST.md and docs/DEVICE_TEST_PLAN_3.1_BROADCAST_STUDIO.md before release.
+- The app uses Android's scoped MediaStore access to list its own BothNow media folders; it does not request broad photo/video library permission. Sharing occurs only when the user chooses Share and selects another app.
 
 ## Important framing note
-The portrait frame is a composition guide. The portrait export uses its position to shift the crop within the part of the camera preview visible on screen. Both outputs are derived from one camera recording; a single recording cannot retain every edge in both aspect ratios. Keep the subject and important action inside the guide area.
+The portrait frame is a composition guide. The portrait export uses its position to shift the crop within the visible camera preview area. A single recording cannot retain every edge in both aspect ratios. Keep the subject and important action inside the portrait guide.
 
 ## Developer
-Designed By: Kekeli Emmanuel  
-All Rights Reserved By: Kekeli Tech Media Agency  
-+233 26 478 3970 · info@ktmaonline.com · https://www.ktmaonline.com
+Designed By: Kekeli Emmanuel
+All Rights Reserved By: Kekeli Tech Media Agency
++233 26 478 3970 | info@ktmaonline.com | https://www.ktmaonline.com
