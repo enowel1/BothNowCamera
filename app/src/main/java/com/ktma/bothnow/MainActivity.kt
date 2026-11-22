@@ -240,7 +240,7 @@ class MainActivity : AppCompatActivity() {
             visibility = View.GONE
             isFillViewport = true
             setBackgroundColor(0x99070b18.toInt())
-            addView(teleprompterText, ScrollView.LayoutParams(-1, -2))
+            addView(teleprompterText, ViewGroup.LayoutParams(-1, -2))
         }
         val prompterParams = FrameLayout.LayoutParams(-1, dp(138), Gravity.TOP).apply {
             leftMargin = dp(18); rightMargin = dp(18); topMargin = dp(12)
