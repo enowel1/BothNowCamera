@@ -5,14 +5,14 @@ plugins {
 
 android {
     namespace = "com.ktma.bothnow"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.ktma.bothnow"
         minSdk = 29
-        targetSdk = 34
-        versionCode = 2
-        versionName = "2.0"
+        targetSdk = 36
+        versionCode = 3
+        versionName = "2.1"
     }
 
     buildTypes {

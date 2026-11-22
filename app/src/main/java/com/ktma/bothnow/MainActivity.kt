@@ -5,6 +5,10 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
+import android.view.MotionEvent
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
@@ -14,15 +18,20 @@ import android.view.ViewGroup
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AlertDialog
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.*
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.effect.BitmapOverlay
@@ -47,6 +56,10 @@ import java.util.Locale
 @OptIn(androidx.media3.common.util.UnstableApi::class)
 class MainActivity : AppCompatActivity() {
     private lateinit var previewView: PreviewView
+    private lateinit var cameraStage: FrameLayout
+    private lateinit var frameGuideView: FrameGuideView
+    private lateinit var liveWatermarkView: ImageView
+    private lateinit var centerLogoButton: Button
     private lateinit var status: TextView
     private lateinit var captureButton: Button
     private lateinit var videoButton: Button
@@ -79,7 +92,12 @@ class MainActivity : AppCompatActivity() {
     private var exportIndex = 0
     private var activeTransformer: Transformer? = null
     private val prefs by lazy { getSharedPreferences("bothnow_settings", MODE_PRIVATE) }
-    private val positions = listOf("Bottom right", "Bottom left", "Top right", "Top left")
+    private val positions = listOf("Bottom right", "Bottom left", "Top right", "Top left", "Center")
+    private var watermarkX = 0.88f
+    private var watermarkY = 0.88f
+    private var portraitCenterX = 0.5f
+    private var portraitCenterY = 0.5f
+    private var portraitGuideRect = RectF()
     private var watermarkPosition = 0
 
     private data class ExportSpec(val label: String, val width: Int, val height: Int)
@@ -97,7 +115,8 @@ class MainActivity : AppCompatActivity() {
                 contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 prefs.edit().putString("watermark_logo_uri", uri.toString()).putBoolean("watermark_enabled", true).apply()
                 updateWatermarkUi()
-                showStatus("YOUR LOGO IS READY FOR BOTH VIDEO EXPORTS")
+                updateLiveWatermark()
+                showStatus("YOUR LOGO IS READY FOR LIVE PREVIEW + BOTH VIDEO EXPORTS")
                 Toast.makeText(this, "Your logo will appear on both exported videos", Toast.LENGTH_LONG).show()
             } catch (e: Exception) {
                 showStatus("LOGO IMPORT FAILED: ${e.localizedMessage ?: "Cannot access image"}")
@@ -107,10 +126,15 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         cameraExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
-        watermarkPosition = prefs.getInt("watermark_position", 0).coerceIn(0, 3)
+        watermarkPosition = prefs.getInt("watermark_position", 0).coerceIn(-1, positions.lastIndex)
+        watermarkX = prefs.getFloat("watermark_x", 0.88f)
+        watermarkY = prefs.getFloat("watermark_y", 0.88f)
+        portraitCenterX = prefs.getFloat("portrait_center_x", 0.5f)
+        portraitCenterY = prefs.getFloat("portrait_center_y", 0.5f)
         buildInterface()
-        if (hasCameraPermission()) startCamera() else permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA))
+        if (hasCameraPermission()) startCamera() else showPermissionDisclosure()
     }
 
     private fun buildInterface() {
@@ -128,16 +152,51 @@ class MainActivity : AppCompatActivity() {
         header.addView(status)
         root.addView(header)
 
-        val stage = FrameLayout(this).apply { setBackgroundColor(android.graphics.Color.BLACK) }
+        cameraStage = FrameLayout(this).apply { setBackgroundColor(android.graphics.Color.BLACK) }
         previewView = PreviewView(this).apply { implementationMode = PreviewView.ImplementationMode.COMPATIBLE; scaleType = PreviewView.ScaleType.FILL_CENTER }
-        stage.addView(previewView, FrameLayout.LayoutParams(-1, -1))
-        root.addView(stage, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(8); bottomMargin = dp(8) })
+        cameraStage.addView(previewView, FrameLayout.LayoutParams(-1, -1))
+        frameGuideView = FrameGuideView()
+        cameraStage.addView(frameGuideView, FrameLayout.LayoutParams(-1, -1))
+        liveWatermarkView = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            visibility = View.GONE
+            setOnTouchListener { view, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> { view.parent?.requestDisallowInterceptTouchEvent(true); view.tag = floatArrayOf(event.rawX - view.x, event.rawY - view.y); true }
+                    MotionEvent.ACTION_MOVE -> {
+                        val offset = view.tag as? FloatArray
+                        if (offset != null) {
+                            view.x = (event.rawX - offset[0]).coerceIn(0f, (cameraStage.width - view.width).coerceAtLeast(0).toFloat())
+                            view.y = (event.rawY - offset[1]).coerceIn(0f, (cameraStage.height - view.height).coerceAtLeast(0).toFloat())
+                            saveWatermarkPositionFromView()
+                        }
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> { saveWatermarkPositionFromView(); view.parent?.requestDisallowInterceptTouchEvent(false); true }
+                    MotionEvent.ACTION_CANCEL -> { view.parent?.requestDisallowInterceptTouchEvent(false); true }
+                    else -> true
+                }
+            }
+        }
+        cameraStage.addView(liveWatermarkView)
+        cameraStage.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            frameGuideView.invalidate()
+            positionLiveWatermark()
+        }
+        root.addView(cameraStage, LinearLayout.LayoutParams(-1, dp(300)).apply { topMargin = dp(8); bottomMargin = dp(8) })
 
         val formatHint = TextView(this).apply {
             text = "ONE TAKE → LANDSCAPE 16:9 + PORTRAIT 9:16 EXPORTS"
             textSize = 11f; gravity = Gravity.CENTER; setTextColor(0xff00d9ff.toInt()); setPadding(0, dp(4), 0, dp(8))
         }
         root.addView(formatHint)
+        val framingHint = TextView(this).apply {
+            text = "DRAG THE PORTRAIT FRAME TO REPOSITION · TAP OUTSIDE IT TO FOCUS"
+            textSize = 10f; gravity = Gravity.CENTER; setTextColor(0xffb8c2df.toInt())
+        }
+        root.addView(framingHint)
+        val frameCenterButton = makeButton("Center portrait frame") { portraitCenterX = 0.5f; portraitCenterY = 0.5f; prefs.edit().putFloat("portrait_center_x", portraitCenterX).putFloat("portrait_center_y", portraitCenterY).apply(); frameGuideView.invalidate() }
+        root.addView(frameCenterButton, LinearLayout.LayoutParams(-1, dp(36)))
 
         val zoomLabel = TextView(this).apply { text = "ZOOM"; textSize = 11f; setTextColor(-1) }
         root.addView(zoomLabel)
@@ -170,6 +229,7 @@ class MainActivity : AppCompatActivity() {
         removeWatermarkButton = makeButton("Remove logo") {
             prefs.edit().remove("watermark_logo_uri").putBoolean("watermark_enabled", false).apply()
             updateWatermarkUi()
+            updateLiveWatermark()
             showStatus("CUSTOM WATERMARK REMOVED")
         }
         watermarkActions.addView(uploadWatermarkButton, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(5) })
@@ -179,23 +239,53 @@ class MainActivity : AppCompatActivity() {
         root.addView(watermarkLogoStatus)
         watermarkToggle = Switch(this).apply {
             text = "Add my uploaded logo to both exports"; setTextColor(-1)
-            setOnCheckedChangeListener { _, checked -> prefs.edit().putBoolean("watermark_enabled", checked).apply() }
+            setOnCheckedChangeListener { _, checked -> prefs.edit().putBoolean("watermark_enabled", checked).apply(); updateLiveWatermark() }
         }
         root.addView(watermarkToggle)
         updateWatermarkUi()
-        watermarkPositionButton = makeButton("Position: ${positions[watermarkPosition]}") {
+        watermarkPositionButton = makeButton("Position: ${if (watermarkPosition >= 0) positions[watermarkPosition] else "Custom"}") {
             watermarkPosition = (watermarkPosition + 1) % positions.size
-            prefs.edit().putInt("watermark_position", watermarkPosition).apply()
+            val point = when (watermarkPosition) {
+                0 -> 0.88f to 0.88f
+                1 -> 0.12f to 0.88f
+                2 -> 0.88f to 0.12f
+                3 -> 0.12f to 0.12f
+                else -> 0.5f to 0.5f
+            }
+            watermarkX = point.first; watermarkY = point.second
+            saveWatermarkPosition()
+            positionLiveWatermark()
             watermarkPositionButton.text = "Position: ${positions[watermarkPosition]}"
         }
         root.addView(watermarkPositionButton, LinearLayout.LayoutParams(-1, dp(40)).apply { topMargin = dp(3) })
+        centerLogoButton = makeButton("Center logo") { watermarkX = 0.5f; watermarkY = 0.5f; watermarkPosition = positions.lastIndex; saveWatermarkPosition(); positionLiveWatermark(); watermarkPositionButton.text = "Position: Center" }
+        root.addView(centerLogoButton, LinearLayout.LayoutParams(-1, dp(38)))
         addSettingSeek(root, "Logo size", "watermark_size", 5, 30, 16).also { watermarkSizeSeek = it }
         addSettingSeek(root, "Logo opacity", "watermark_opacity", 10, 100, 85).also { watermarkOpacitySeek = it }
         exportProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100; progress = 0; visibility = View.GONE }
         root.addView(exportProgress, LinearLayout.LayoutParams(-1, dp(8)).apply { topMargin = dp(7) })
         val note = TextView(this).apply { text = "Upload your own transparent PNG or image logo. It is burned into both Landscape and Portrait exports. Videos save to Movies/BothNow."; textSize = 10f; gravity = Gravity.CENTER; setTextColor(0xffb8c2df.toInt()); setPadding(0, dp(5), 0, 0) }
         root.addView(note)
-        setContentView(root)
+        val privacyButton = makeButton("Privacy Policy") { showPrivacyPolicy() }
+        root.addView(privacyButton, LinearLayout.LayoutParams(-1, dp(38)).apply { topMargin = dp(8) })
+        val developer = TextView(this).apply {
+            text = "Designed By: Kekeli Emmanuel\\nAll Rights Reserved By: Kekeli Tech Media Agency\\n+233 26 478 3970  |  info@ktmaonline.com\\nwww.ktmaonline.com"
+            textSize = 10f; gravity = Gravity.CENTER; setTextColor(0xffb8c2df.toInt()); setPadding(0, dp(8), 0, dp(4))
+        }
+        root.addView(developer)
+        val scrollContainer = ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+            addView(root)
+        }
+        setContentView(scrollContainer)
+        ViewCompat.setOnApplyWindowInsetsListener(scrollContainer) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(0, bars.top, 0, bars.bottom)
+            insets
+        }
+        ViewCompat.requestApplyInsets(scrollContainer)
+        updateLiveWatermark()
     }
 
     private fun addSettingSeek(root: LinearLayout, label: String, key: String, min: Int, maxValue: Int, default: Int): SeekBar {
@@ -206,7 +296,10 @@ class MainActivity : AppCompatActivity() {
             max = maxValue - min
             progress = (prefs.getInt(key, default) - min).coerceIn(0, max)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) { if (fromUser) prefs.edit().putInt(key, p + min).apply() }
+                override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) { if (fromUser) {
+                    prefs.edit().putInt(key, p + min).apply()
+                    if (key == "watermark_size" || key == "watermark_opacity") updateLiveWatermark()
+                } }
                 override fun onStartTrackingTouch(s: SeekBar?) {}
                 override fun onStopTrackingTouch(s: SeekBar?) {}
             })
@@ -323,9 +416,15 @@ class MainActivity : AppCompatActivity() {
             val halfW: Float; val halfH: Float
             if (sourceAspect > targetAspect) { halfW = targetAspect / sourceAspect; halfH = 1f }
             else { halfW = 1f; halfH = sourceAspect / targetAspect }
-            val crop = Crop(-halfW, halfW, -halfH, halfH)
+            val viewAspect = if (cameraStage.height > 0) cameraStage.width.toFloat() / cameraStage.height else sourceAspect
+            val visibleHalfW = if (viewAspect < sourceAspect) viewAspect / sourceAspect else 1f
+            val visibleHalfH = if (viewAspect > sourceAspect) sourceAspect / viewAspect else 1f
+            val followGuide = spec.label == "PORTRAIT"
+            val cropCenterX = if (followGuide) (((portraitCenterX * 2f) - 1f) * visibleHalfW).coerceIn(-(1f - halfW), 1f - halfW) else 0f
+            val cropCenterY = if (followGuide) (((1f - portraitCenterY * 2f) * visibleHalfH)).coerceIn(-(1f - halfH), 1f - halfH) else 0f
+            val crop = Crop(-halfW + cropCenterX, halfW + cropCenterX, -halfH + cropCenterY, halfH + cropCenterY)
             val effects = mutableListOf<androidx.media3.common.Effect>(crop, Presentation.createForWidthAndHeight(spec.width, spec.height, Presentation.LAYOUT_SCALE_TO_FIT))
-            if (watermarkToggle.isChecked && prefs.getString("watermark_logo_uri", null) != null) {
+            if (prefs.getBoolean("watermark_enabled", false) && prefs.getString("watermark_logo_uri", null) != null) {
                 effects.add(createLogoOverlay(spec.width, spec.height))
             }
             val mediaItem = MediaItem.fromUri(Uri.fromFile(raw))
@@ -357,6 +456,7 @@ class MainActivity : AppCompatActivity() {
         watermarkToggle.isEnabled = hasLogo
         watermarkToggle.isChecked = hasLogo && prefs.getBoolean("watermark_enabled", true)
         removeWatermarkButton.isEnabled = hasLogo
+        if (::liveWatermarkView.isInitialized) updateLiveWatermark()
     }
 
     private fun createLogoOverlay(outputWidth: Int, outputHeight: Int): OverlayEffect {
@@ -370,18 +470,175 @@ class MainActivity : AppCompatActivity() {
         val scaled = Bitmap.createScaledBitmap(original, targetW, targetH, true)
         if (scaled !== original) original.recycle()
         val alpha = prefs.getInt("watermark_opacity", 85) / 100f
-        val anchors = when (watermarkPosition) {
-            1 -> floatArrayOf(-1f, -1f, -0.94f, -0.94f)
-            2 -> floatArrayOf(1f, 1f, 0.94f, 0.94f)
-            3 -> floatArrayOf(-1f, 1f, -0.94f, 0.94f)
-            else -> floatArrayOf(1f, -1f, 0.94f, -0.94f)
-        }
+        val anchorX = watermarkX.coerceIn(0.05f, 0.95f) * 2f - 1f
+        val anchorY = 1f - watermarkY.coerceIn(0.05f, 0.95f) * 2f
         val settings = StaticOverlaySettings.Builder()
-            .setOverlayFrameAnchor(anchors[0], anchors[1])
-            .setBackgroundFrameAnchor(anchors[2], anchors[3])
+            .setOverlayFrameAnchor(anchorX, anchorY)
+            .setBackgroundFrameAnchor(anchorX, anchorY)
             .setAlphaScale(alpha)
             .build()
         return OverlayEffect(listOf(BitmapOverlay.createStaticBitmapOverlay(scaled, settings)))
+    }
+
+    private fun showPermissionDisclosure() {
+        AlertDialog.Builder(this)
+            .setTitle("Camera and microphone access")
+            .setMessage("BothNow Camera uses the camera to take photos and record videos. Microphone access is requested when you start recording so the video can include sound; if you deny it, the video is recorded without audio. Your recordings and uploaded logo are processed and saved on your device; this app does not upload them to a BothNow server.")
+            .setNegativeButton("Not now") { _, _ -> showStatus("CAMERA PERMISSION NOT GRANTED") }
+            .setPositiveButton("Continue") { _, _ -> permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA)) }
+            .setCancelable(false)
+            .show()
+    }
+
+    private fun showPrivacyPolicy() {
+        val body = """BothNow Camera — Privacy Policy
+Effective date: 22 November 2026
+
+Developer: Kekeli Tech Media Agency
+Contact: +233 26 478 3970 | info@ktmaonline.com
+Website: https://www.ktmaonline.com
+
+1. Information and permissions
+The app requests camera access to capture photos and videos. It requests microphone access when you start recording so the video can include sound. You may deny microphone access and record without audio. The app does not request contacts, location, SMS, or account credentials.
+
+2. On-device processing
+Camera and microphone data are used to create the photo or video you request. The original recording is temporarily processed on your device to create landscape and portrait exports. Finished media is saved to your device's Pictures/BothNow or Movies/BothNow folders. The temporary source file is deleted after successful export.
+
+3. Uploaded logo
+If you choose a logo from your device, BothNow uses that selected image to display a live preview and add a watermark to exported videos. The selected logo reference and watermark preferences are stored locally on your device until you remove or replace them.
+
+4. Collection and sharing
+The app is designed not to transmit camera footage, microphone audio, selected logos, or personal information to the developer. The current app build contains no advertising or analytics SDK. Media is not shared by the app; you decide whether to share files using other apps on your device.
+
+5. Retention and deletion
+Photos and finished videos remain on your device until you delete them. You can remove your selected watermark in the app settings. Unfinished temporary recording files are removed after successful export; if an export fails, a temporary file may remain in app storage until Android clears it or the app is reinstalled.
+
+6. Security and children's privacy
+Use a device lock and keep your device software up to date. The app is a general camera utility and is not designed to collect information from children.
+
+7. Changes and contact
+This policy may be updated when app functionality changes. For privacy questions, contact info@ktmaonline.com or +233 26 478 3970.
+"""
+        val content = TextView(this).apply { text = body; textSize = 14f; setTextColor(0xff172033.toInt()); setPadding(dp(18), dp(14), dp(18), dp(14)) }
+        val scroll = ScrollView(this).apply { addView(content) }
+        AlertDialog.Builder(this).setTitle("Privacy Policy").setView(scroll).setPositiveButton("Close", null).show()
+    }
+
+    private fun saveWatermarkPosition() {
+        prefs.edit().putInt("watermark_position", watermarkPosition)
+            .putFloat("watermark_x", watermarkX).putFloat("watermark_y", watermarkY).apply()
+    }
+
+    private fun saveWatermarkPositionFromView() {
+        if (cameraStage.width <= 0 || liveWatermarkView.width <= 0) return
+        watermarkX = (liveWatermarkView.x + liveWatermarkView.width / 2f) / cameraStage.width
+        watermarkY = (liveWatermarkView.y + liveWatermarkView.height / 2f) / cameraStage.height
+        watermarkPosition = -1
+        saveWatermarkPosition()
+        watermarkPositionButton.text = "Position: Custom"
+    }
+
+    private fun positionLiveWatermark() {
+        if (!::liveWatermarkView.isInitialized || cameraStage.width <= 0) return
+        val percent = prefs.getInt("watermark_size", 16).coerceIn(5, 30) / 100f
+        val width = (cameraStage.width * percent).toInt().coerceAtLeast(dp(36))
+        val drawable = liveWatermarkView.drawable
+        val ratio = if (drawable != null && drawable.intrinsicWidth > 0) drawable.intrinsicHeight.toFloat() / drawable.intrinsicWidth else 0.35f
+        val height = (width * ratio).toInt().coerceAtLeast(dp(20))
+        val params = liveWatermarkView.layoutParams ?: FrameLayout.LayoutParams(width, height)
+        params.width = width; params.height = height
+        liveWatermarkView.layoutParams = params
+        liveWatermarkView.x = (cameraStage.width * watermarkX - width / 2f).coerceIn(0f, (cameraStage.width - width).coerceAtLeast(0).toFloat())
+        liveWatermarkView.y = (cameraStage.height * watermarkY - height / 2f).coerceIn(0f, (cameraStage.height - height).coerceAtLeast(0).toFloat())
+    }
+
+    private fun updateLiveWatermark() {
+        if (!::liveWatermarkView.isInitialized) return
+        val uri = prefs.getString("watermark_logo_uri", null)
+        val enabled = prefs.getBoolean("watermark_enabled", false) && !uri.isNullOrBlank()
+        if (!enabled) { liveWatermarkView.visibility = View.GONE; return }
+        try {
+            val bitmap = contentResolver.openInputStream(Uri.parse(uri!!))?.use { BitmapFactory.decodeStream(it) }
+            if (bitmap != null) {
+                liveWatermarkView.setImageBitmap(bitmap)
+                liveWatermarkView.alpha = prefs.getInt("watermark_opacity", 85).coerceIn(10, 100) / 100f
+                liveWatermarkView.visibility = View.VISIBLE
+                positionLiveWatermark()
+            } else liveWatermarkView.visibility = View.GONE
+        } catch (_: Exception) { liveWatermarkView.visibility = View.GONE }
+    }
+
+    private fun focusAt(x: Float, y: Float) {
+        val activeCamera = camera ?: return
+        val point = previewView.meteringPointFactory.createPoint(x, y)
+        val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
+            .setAutoCancelDuration(3, java.util.concurrent.TimeUnit.SECONDS).build()
+        activeCamera.cameraControl.startFocusAndMetering(action)
+        showStatus("FOCUSING…")
+    }
+
+    private inner class FrameGuideView : View(this@MainActivity) {
+        private val landscapePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xff00d9ff.toInt(); style = Paint.Style.STROKE; strokeWidth = dp(2).toFloat() }
+        private val portraitPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xffffc857.toInt(); style = Paint.Style.STROKE; strokeWidth = dp(2).toFloat(); pathEffect = android.graphics.DashPathEffect(floatArrayOf(dp(8).toFloat(), dp(5).toFloat()), 0f) }
+        private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = -1; textSize = dp(10).toFloat(); setShadowLayer(3f, 1f, 1f, android.graphics.Color.BLACK) }
+        private var draggingPortrait = false
+        private var downX = 0f
+        private var downY = 0f
+
+        private fun calculatePortraitRect(): RectF {
+            val w = width.toFloat(); val h = height.toFloat()
+            if (w <= 0f || h <= 0f) return RectF()
+            val frameW = minOf(w * 0.42f, h * 9f / 16f)
+            val frameH = frameW * 16f / 9f
+            val cx = (portraitCenterX * w).coerceIn(frameW / 2f, w - frameW / 2f)
+            val cy = (portraitCenterY * h).coerceIn(frameH / 2f, h - frameH / 2f)
+            return RectF(cx - frameW / 2f, cy - frameH / 2f, cx + frameW / 2f, cy + frameH / 2f)
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val landscapeW = minOf(width * 0.92f, height * 16f / 9f)
+            val landscapeH = landscapeW * 9f / 16f
+            val lx = (width - landscapeW) / 2f
+            val ly = (height - landscapeH) / 2f
+            canvas.drawRect(lx, ly, lx + landscapeW, ly + landscapeH, landscapePaint)
+            val portrait = calculatePortraitRect()
+            portraitGuideRect = portrait
+            canvas.drawRoundRect(portrait, dp(5).toFloat(), dp(5).toFloat(), portraitPaint)
+            canvas.drawText("LANDSCAPE 16:9", lx + dp(5), (ly + dp(14)).coerceAtMost(height - dp(4).toFloat()), labelPaint)
+            canvas.drawText("PORTRAIT 9:16 · DRAG", portrait.left + dp(4), (portrait.top + dp(14)).coerceAtMost(height - dp(4).toFloat()), labelPaint)
+            canvas.drawCircle(portrait.centerX(), portrait.centerY(), dp(4).toFloat(), portraitPaint)
+        }
+
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.x; downY = event.y
+                    draggingPortrait = portraitGuideRect.contains(event.x, event.y)
+                    if (draggingPortrait) parent?.requestDisallowInterceptTouchEvent(true)
+                    return true
+                }
+                MotionEvent.ACTION_MOVE -> if (draggingPortrait) {
+                    val w = width.toFloat().coerceAtLeast(1f); val h = height.toFloat().coerceAtLeast(1f)
+                    val frameW = minOf(w * 0.42f, h * 9f / 16f)
+                    val frameH = frameW * 16f / 9f
+                    portraitCenterX = (event.x / w).coerceIn(frameW / (2f * w), 1f - frameW / (2f * w))
+                    portraitCenterY = (event.y / h).coerceIn(frameH / (2f * h), 1f - frameH / (2f * h))
+                    prefs.edit().putFloat("portrait_center_x", portraitCenterX).putFloat("portrait_center_y", portraitCenterY).apply()
+                    invalidate()
+                    return true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (!draggingPortrait) focusAt(event.x, event.y)
+                    else showStatus("PORTRAIT FRAME POSITION UPDATED")
+                    draggingPortrait = false
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                    return true
+                }
+                MotionEvent.ACTION_CANCEL -> { draggingPortrait = false; parent?.requestDisallowInterceptTouchEvent(false); return true }
+            }
+            return true
+        }
     }
 
     private fun saveExportToGallery(file: File, displayName: String) {
