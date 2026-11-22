@@ -67,6 +67,11 @@ import java.util.Locale
 class MainActivity : AppCompatActivity() {
     private lateinit var previewView: PreviewView
     private lateinit var cameraStage: FrameLayout
+    private lateinit var rootLayout: LinearLayout
+    private lateinit var controlsPanelLayout: LinearLayout
+    private lateinit var headerLayout: LinearLayout
+    private lateinit var controlsScrollLayout: ScrollView
+    private lateinit var mainScrollLayout: ScrollView
     private lateinit var frameGuideView: FrameGuideView
     private lateinit var landscapeWatermarkView: ImageView
     private lateinit var portraitWatermarkView: ImageView
@@ -205,19 +210,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun buildInterface() {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        val isLandscapeUi = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        rootLayout = LinearLayout(this).apply {
+            orientation = if (isLandscapeUi) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
             setBackgroundColor(android.graphics.Color.rgb(7, 9, 27))
-            setPadding(dp(12), dp(8), dp(12), dp(10))
+            setPadding(dp(8), dp(6), dp(8), dp(6))
         }
-        val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        controlsPanelLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+        headerLayout = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val logo = ImageView(this).apply { setImageResource(R.mipmap.ic_launcher); scaleType = ImageView.ScaleType.FIT_CENTER }
-        header.addView(logo, LinearLayout.LayoutParams(dp(48), dp(48)))
+        headerLayout.addView(logo, LinearLayout.LayoutParams(dp(48), dp(48)))
         val brand = TextView(this).apply { text = "BothNow Camera"; setTextColor(-1); textSize = 19f; setPadding(dp(10), 0, 0, 0); typeface = android.graphics.Typeface.DEFAULT_BOLD }
-        header.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
+        headerLayout.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
         status = TextView(this).apply { text = "STARTING CAMERA"; textSize = 10f; setTextColor(android.graphics.Color.CYAN); setPadding(dp(8), dp(7), dp(8), dp(7)); setBackgroundColor(0xff19224c.toInt()) }
-        header.addView(status)
-        root.addView(header)
+        headerLayout.addView(status)
+        // Header is moved into the active layout by applyResponsiveLayout().
 
         cameraStage = FrameLayout(this).apply { setBackgroundColor(android.graphics.Color.BLACK) }
         previewView = PreviewView(this).apply { implementationMode = PreviewView.ImplementationMode.COMPATIBLE; scaleType = PreviewView.ScaleType.FILL_CENTER }
@@ -253,20 +263,21 @@ class MainActivity : AppCompatActivity() {
                 positionLiveWatermark("PORTRAIT", portraitWatermarkView)
             }
         }
-        root.addView(cameraStage, LinearLayout.LayoutParams(-1, dp(300)).apply { topMargin = dp(8); bottomMargin = dp(8) })
+        // Camera preview and controls are attached after construction so the layout can
+        // switch between a stacked portrait layout and a side-by-side landscape layout.
 
         val formatHint = TextView(this).apply {
             text = "ONE TAKE → LANDSCAPE 16:9 + PORTRAIT 9:16 EXPORTS"
             textSize = 11f; gravity = Gravity.CENTER; setTextColor(0xff00d9ff.toInt()); setPadding(0, dp(4), 0, dp(8))
         }
-        root.addView(formatHint)
+        controlsPanelLayout.addView(formatHint)
         val framingHint = TextView(this).apply {
             text = "DRAG PORTRAIT FRAME · PINCH TO ZOOM · TAP TO FOCUS"
             textSize = 10f; gravity = Gravity.CENTER; setTextColor(0xffb8c2df.toInt())
         }
-        root.addView(framingHint)
+        controlsPanelLayout.addView(framingHint)
         val frameCenterButton = makeButton("Center portrait frame") { portraitCenterX = 0.5f; portraitCenterY = 0.5f; prefs.edit().putFloat("portrait_center_x", portraitCenterX).putFloat("portrait_center_y", portraitCenterY).apply(); frameGuideView.invalidate() }
-        root.addView(frameCenterButton, LinearLayout.LayoutParams(-1, dp(36)))
+        controlsPanelLayout.addView(frameCenterButton, LinearLayout.LayoutParams(-1, dp(36)))
 
         val compositionAndTimer = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         compositionButton = makeButton("Guide: Thirds") { cycleCompositionGuide() }
@@ -279,11 +290,11 @@ class MainActivity : AppCompatActivity() {
             frameGuideView.invalidate()
         }
         compositionAndTimer.addView(horizonButton, LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginStart = dp(5) })
-        root.addView(compositionAndTimer)
+        controlsPanelLayout.addView(compositionAndTimer)
         updateCompositionAndTimerLabels()
 
         val zoomLabel = TextView(this).apply { text = "ZOOM"; textSize = 11f; setTextColor(-1) }
-        root.addView(zoomLabel)
+        controlsPanelLayout.addView(zoomLabel)
         zoomSeek = SeekBar(this).apply { max = 100; progress = 0; setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) { if (fromUser) {
                 currentZoomRatio = 1f + (maxZoom - 1f) * progress / 100f
@@ -292,10 +303,10 @@ class MainActivity : AppCompatActivity() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         }) }
-        root.addView(zoomSeek, LinearLayout.LayoutParams(-1, dp(32)))
+        controlsPanelLayout.addView(zoomSeek, LinearLayout.LayoutParams(-1, dp(32)))
 
         exposureLabel = TextView(this).apply { text = "EXPOSURE · 0.0 EV"; textSize = 11f; setTextColor(-1) }
-        root.addView(exposureLabel)
+        controlsPanelLayout.addView(exposureLabel)
         exposureSeek = SeekBar(this).apply {
             max = 100; progress = 50
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -306,16 +317,16 @@ class MainActivity : AppCompatActivity() {
                 override fun onStopTrackingTouch(seekBar: SeekBar?) {}
             })
         }
-        root.addView(exposureSeek, LinearLayout.LayoutParams(-1, dp(32)))
+        controlsPanelLayout.addView(exposureSeek, LinearLayout.LayoutParams(-1, dp(32)))
         val exposureReset = makeButton("Reset exposure") { setExposureIndex(0) }
-        root.addView(exposureReset, LinearLayout.LayoutParams(-1, dp(34)))
+        controlsPanelLayout.addView(exposureReset, LinearLayout.LayoutParams(-1, dp(34)))
 
         val tools = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         flashButton = makeButton("Flash off") { toggleTorch() }
         switchButton = makeButton("Flip camera") { switchCamera() }
         tools.addView(flashButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(5) })
         tools.addView(switchButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(5) })
-        root.addView(tools)
+        controlsPanelLayout.addView(tools)
 
         val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         captureButton = makeButton("PHOTO") { takePhoto() }
@@ -323,23 +334,23 @@ class MainActivity : AppCompatActivity() {
         captureButton.setBackgroundColor(0xff1d3652.toInt()); videoButton.setBackgroundColor(0xff8e1830.toInt())
         actions.addView(captureButton, LinearLayout.LayoutParams(0, dp(52), 0.75f).apply { marginEnd = dp(5); topMargin = dp(7) })
         actions.addView(videoButton, LinearLayout.LayoutParams(0, dp(52), 1.5f).apply { marginStart = dp(5); topMargin = dp(7) })
-        root.addView(actions)
+        controlsPanelLayout.addView(actions)
         recordingInfo = TextView(this).apply { text = "READY · STORAGE CHECK ENABLED"; textSize = 10f; gravity = Gravity.CENTER; setTextColor(0xffb8c2df.toInt()); setPadding(0, dp(4), 0, dp(4)) }
-        root.addView(recordingInfo)
+        controlsPanelLayout.addView(recordingInfo)
         audioMeterLabel = TextView(this).apply {
             text = "MIC INPUT · LEVEL METER ACTIVE DURING RECORDING · PEAK ALERT AT 85%"
             textSize = 9f; gravity = Gravity.CENTER; setTextColor(0xffb8c2df.toInt()); setPadding(0, dp(2), 0, dp(2))
         }
-        root.addView(audioMeterLabel)
+        controlsPanelLayout.addView(audioMeterLabel)
         audioMeterView = AudioMeterView()
-        root.addView(audioMeterView, LinearLayout.LayoutParams(-1, dp(18)).apply { bottomMargin = dp(5) })
+        controlsPanelLayout.addView(audioMeterView, LinearLayout.LayoutParams(-1, dp(18)).apply { bottomMargin = dp(5) })
 
         val prompterTitle = TextView(this).apply {
             text = "TELEPROMPTER · READ WHILE RECORDING"
             textSize = 12f; typeface = android.graphics.Typeface.DEFAULT_BOLD
             setTextColor(0xff00d9ff.toInt()); setPadding(0, dp(10), 0, dp(4))
         }
-        root.addView(prompterTitle)
+        controlsPanelLayout.addView(prompterTitle)
         val prompterActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         val editScriptButton = makeButton("Edit script") { editTeleprompterScript() }
         teleprompterToggleButton = makeButton("Start scrolling") { toggleTeleprompter() }
@@ -349,14 +360,14 @@ class MainActivity : AppCompatActivity() {
         prompterActions.addView(teleprompterToggleButton, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(4); marginEnd = dp(4) })
         prompterActions.addView(resetScriptButton, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(4); marginEnd = dp(4) })
         prompterActions.addView(hideScriptButton, LinearLayout.LayoutParams(0, dp(42), 0.7f).apply { marginStart = dp(4) })
-        root.addView(prompterActions)
+        controlsPanelLayout.addView(prompterActions)
         teleprompterStatus = TextView(this).apply {
             text = "Script is private to this device · Not burned into exported videos"
             textSize = 10f; setTextColor(0xffb8c2df.toInt()); gravity = Gravity.CENTER
         }
-        root.addView(teleprompterStatus)
+        controlsPanelLayout.addView(teleprompterStatus)
         val speedLabel = TextView(this).apply { text = "SCROLL SPEED"; textSize = 10f; setTextColor(-1) }
-        root.addView(speedLabel)
+        controlsPanelLayout.addView(speedLabel)
         val speedSeek = SeekBar(this).apply {
             max = 4; progress = teleprompterSpeed
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -367,12 +378,12 @@ class MainActivity : AppCompatActivity() {
                 override fun onStopTrackingTouch(seekBar: SeekBar?) {}
             })
         }
-        root.addView(speedSeek, LinearLayout.LayoutParams(-1, dp(30)))
+        controlsPanelLayout.addView(speedSeek, LinearLayout.LayoutParams(-1, dp(30)))
         galleryButton = makeButton("Open BothNow Gallery · Preview / Share / Delete") { openBothNowGallery() }
-        root.addView(galleryButton, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(4) })
+        controlsPanelLayout.addView(galleryButton, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(4) })
 
         val settingsTitle = TextView(this).apply { text = "INDEPENDENT WATERMARK SETTINGS"; textSize = 12f; typeface = android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xff00d9ff.toInt()); setPadding(0, dp(10), 0, dp(4)) }
-        root.addView(settingsTitle)
+        controlsPanelLayout.addView(settingsTitle)
         val watermarkActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         uploadWatermarkButton = makeButton("Upload my logo") { watermarkPicker.launch(arrayOf("image/png", "image/jpeg", "image/webp")) }
         removeWatermarkButton = makeButton("Remove logo") {
@@ -382,9 +393,9 @@ class MainActivity : AppCompatActivity() {
         }
         watermarkActions.addView(uploadWatermarkButton, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(5) })
         watermarkActions.addView(removeWatermarkButton, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(5) })
-        root.addView(watermarkActions)
+        controlsPanelLayout.addView(watermarkActions)
         watermarkLogoStatus = TextView(this).apply { textSize = 10f; setTextColor(0xffb8c2df.toInt()); setPadding(0, dp(4), 0, dp(3)) }
-        root.addView(watermarkLogoStatus)
+        controlsPanelLayout.addView(watermarkLogoStatus)
         watermarkToggle = Switch(this).apply {
             text = "Show both independent logos in their frames"; setTextColor(-1)
             setOnCheckedChangeListener { _, checked ->
@@ -392,7 +403,7 @@ class MainActivity : AppCompatActivity() {
                 updateLiveWatermark()
             }
         }
-        root.addView(watermarkToggle)
+        controlsPanelLayout.addView(watermarkToggle)
         updateWatermarkUi()
 
         val profileRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
@@ -408,40 +419,86 @@ class MainActivity : AppCompatActivity() {
         }
         profileRow.addView(landscapeProfileButton, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(5) })
         profileRow.addView(portraitProfileButton, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(5) })
-        root.addView(profileRow)
+        controlsPanelLayout.addView(profileRow)
 
         watermarkPositionButton = makeButton("Position: Bottom right") { cycleActiveWatermarkPosition() }
-        root.addView(watermarkPositionButton, LinearLayout.LayoutParams(-1, dp(40)).apply { topMargin = dp(3) })
+        controlsPanelLayout.addView(watermarkPositionButton, LinearLayout.LayoutParams(-1, dp(40)).apply { topMargin = dp(3) })
         centerLogoButton = makeButton("Center selected logo") {
             setActiveWatermarkPosition(0.5f, 0.5f, positions.lastIndex)
         }
-        root.addView(centerLogoButton, LinearLayout.LayoutParams(-1, dp(38)))
-        addWatermarkSettingSeek(root, "Selected logo size", "size", 5, 35, 16).also { watermarkSizeSeek = it }
-        addWatermarkSettingSeek(root, "Selected logo opacity", "opacity", 10, 100, 85).also { watermarkOpacitySeek = it }
+        controlsPanelLayout.addView(centerLogoButton, LinearLayout.LayoutParams(-1, dp(38)))
+        addWatermarkSettingSeek(controlsPanelLayout, "Selected logo size", "size", 5, 35, 16).also { watermarkSizeSeek = it }
+        addWatermarkSettingSeek(controlsPanelLayout, "Selected logo opacity", "opacity", 10, 100, 85).also { watermarkOpacitySeek = it }
         exportProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100; progress = 0; visibility = View.GONE }
-        root.addView(exportProgress, LinearLayout.LayoutParams(-1, dp(8)).apply { topMargin = dp(7) })
+        controlsPanelLayout.addView(exportProgress, LinearLayout.LayoutParams(-1, dp(8)).apply { topMargin = dp(7) })
         val note = TextView(this).apply { text = "Upload one logo, then edit Landscape and Portrait independently. Drag either preview logo to position it. Pinch the camera preview to zoom. Videos save to Movies/BothNow."; textSize = 10f; gravity = Gravity.CENTER; setTextColor(0xffb8c2df.toInt()); setPadding(0, dp(5), 0, 0) }
-        root.addView(note)
+        controlsPanelLayout.addView(note)
         val privacyButton = makeButton("Privacy Policy") { showPrivacyPolicy() }
-        root.addView(privacyButton, LinearLayout.LayoutParams(-1, dp(38)).apply { topMargin = dp(8) })
+        controlsPanelLayout.addView(privacyButton, LinearLayout.LayoutParams(-1, dp(38)).apply { topMargin = dp(8) })
         val developer = TextView(this).apply {
             text = "Designed By: Kekeli Emmanuel\\nAll Rights Reserved By: Kekeli Tech Media Agency\\n+233 26 478 3970  |  info@ktmaonline.com\\nwww.ktmaonline.com"
             textSize = 10f; gravity = Gravity.CENTER; setTextColor(0xffb8c2df.toInt()); setPadding(0, dp(8), 0, dp(4))
         }
-        root.addView(developer)
-        val scrollContainer = ScrollView(this).apply {
+        controlsPanelLayout.addView(developer)
+        controlsScrollLayout = ScrollView(this).apply {
+            isFillViewport = false
+            clipToPadding = false
+            addView(controlsPanelLayout, ScrollView.LayoutParams(-1, -2))
+        }
+        mainScrollLayout = ScrollView(this).apply {
             isFillViewport = true
             clipToPadding = false
-            addView(root)
         }
-        setContentView(scrollContainer)
-        ViewCompat.setOnApplyWindowInsetsListener(scrollContainer) { view, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            view.setPadding(0, bars.top, 0, bars.bottom)
-            insets
-        }
-        ViewCompat.requestApplyInsets(scrollContainer)
+        applyResponsiveLayout(isLandscapeUi)
         updateLiveWatermark()
+    }
+
+    private fun applyResponsiveLayout(landscape: Boolean) {
+        if (!::rootLayout.isInitialized) return
+        (rootLayout.parent as? ViewGroup)?.removeView(rootLayout)
+        (mainScrollLayout.parent as? ViewGroup)?.removeView(mainScrollLayout)
+        rootLayout.removeAllViews()
+        (headerLayout.parent as? ViewGroup)?.removeView(headerLayout)
+        (cameraStage.parent as? ViewGroup)?.removeView(cameraStage)
+        (controlsScrollLayout.parent as? ViewGroup)?.removeView(controlsScrollLayout)
+
+        if (landscape) {
+            controlsPanelLayout.addView(headerLayout, 0, LinearLayout.LayoutParams(-1, -2))
+            rootLayout.orientation = LinearLayout.HORIZONTAL
+            rootLayout.addView(cameraStage, LinearLayout.LayoutParams(0, -1, 1f).apply { marginEnd = dp(8) })
+            rootLayout.addView(controlsScrollLayout, LinearLayout.LayoutParams(dp(360), -1))
+            rootLayout.setPadding(dp(8), dp(6), dp(8), dp(6))
+            setContentView(rootLayout)
+            ViewCompat.setOnApplyWindowInsetsListener(rootLayout) { view, insets ->
+                val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                view.setPadding(dp(8), bars.top, dp(8), bars.bottom)
+                insets
+            }
+            ViewCompat.requestApplyInsets(rootLayout)
+        } else {
+            (headerLayout.parent as? ViewGroup)?.removeView(headerLayout)
+            rootLayout.orientation = LinearLayout.VERTICAL
+            rootLayout.addView(headerLayout, LinearLayout.LayoutParams(-1, -2))
+            rootLayout.addView(cameraStage, LinearLayout.LayoutParams(-1, dp(300)).apply { topMargin = dp(8); bottomMargin = dp(8) })
+            rootLayout.addView(controlsScrollLayout, LinearLayout.LayoutParams(-1, -2))
+            rootLayout.setPadding(dp(8), dp(6), dp(8), dp(6))
+            mainScrollLayout.addView(rootLayout, ScrollView.LayoutParams(-1, -2))
+            setContentView(mainScrollLayout)
+            ViewCompat.setOnApplyWindowInsetsListener(mainScrollLayout) { view, insets ->
+                val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                view.setPadding(0, bars.top, 0, bars.bottom)
+                insets
+            }
+            ViewCompat.requestApplyInsets(mainScrollLayout)
+        }
+        cameraStage.requestLayout()
+        controlsPanelLayout.requestLayout()
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        applyResponsiveLayout(newConfig.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
+        if (::frameGuideView.isInitialized) frameGuideView.invalidate()
     }
 
     private fun editTeleprompterScript() {
@@ -581,15 +638,33 @@ class MainActivity : AppCompatActivity() {
     private fun openBothNowGallery() {
         val items = mutableListOf<GalleryItem>()
         fun collect(collection: Uri, relativePath: String) {
-            val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.MIME_TYPE, MediaStore.MediaColumns.DATE_ADDED)
-            contentResolver.query(collection, projection, "${MediaStore.MediaColumns.RELATIVE_PATH}=?", arrayOf(relativePath), "${MediaStore.MediaColumns.DATE_ADDED} DESC")?.use { cursor ->
+            val projection = arrayOf(
+                MediaStore.MediaColumns._ID,
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.MIME_TYPE,
+                MediaStore.MediaColumns.DATE_ADDED,
+                MediaStore.MediaColumns.RELATIVE_PATH
+            )
+            contentResolver.query(
+                collection,
+                projection,
+                "${MediaStore.MediaColumns.RELATIVE_PATH}=?",
+                arrayOf(relativePath),
+                "${MediaStore.MediaColumns.DATE_ADDED} DESC"
+            )?.use { cursor ->
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
                 val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
                 val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
                 val dateCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idCol)
-                    items.add(GalleryItem(ContentUris.withAppendedId(collection, id), cursor.getString(nameCol) ?: "BothNow media", cursor.getString(mimeCol) ?: "application/octet-stream", cursor.getLong(dateCol)))
+                    val mime = cursor.getString(mimeCol) ?: if (collection == MediaStore.Video.Media.EXTERNAL_CONTENT_URI) "video/mp4" else "image/jpeg"
+                    items.add(GalleryItem(
+                        ContentUris.withAppendedId(collection, id),
+                        cursor.getString(nameCol) ?: "BothNow media",
+                        mime,
+                        cursor.getLong(dateCol)
+                    ))
                 }
             }
         }
@@ -602,29 +677,109 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (items.isEmpty()) {
-            AlertDialog.Builder(this).setTitle("BothNow Gallery").setMessage("No BothNow photos or videos yet. Capture a photo or record a video to see it here.").setPositiveButton("Close", null).show()
+            AlertDialog.Builder(this).setTitle("BothNow Gallery")
+                .setMessage("No BothNow photos or videos yet. Capture a photo or record a video to see it here.")
+                .setPositiveButton("Close", null).show()
             return
         }
-        val labels = items.map { it.name }.toTypedArray()
-        AlertDialog.Builder(this).setTitle("BothNow Gallery · ${items.size} items").setItems(labels) { _, which -> showGalleryItemActions(items[which]) }.setNegativeButton("Close", null).show()
+        val list = ListView(this).apply {
+            divider = android.graphics.drawable.ColorDrawable(0xff263653.toInt())
+            dividerHeight = dp(1)
+            adapter = object : android.widget.BaseAdapter() {
+                override fun getCount() = items.size
+                override fun getItem(position: Int) = items[position]
+                override fun getItemId(position: Int) = position.toLong()
+                override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                    val item = items[position]
+                    return (convertView as? TextView ?: TextView(this@MainActivity).apply {
+                        setPadding(dp(16), dp(14), dp(16), dp(14))
+                        textSize = 14f
+                        setTextColor(android.graphics.Color.WHITE)
+                    }).apply {
+                        text = (if (item.mime.startsWith("video/")) "▶  " else "▧  ") + item.name + "\n" + if (item.mime.startsWith("video/")) "VIDEO · Tap to watch or share" else "PHOTO · Tap to view or share"
+                    }
+                }
+            }
+            setOnItemClickListener { _, _, position, _ -> showGalleryItemActions(items[position]) }
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("BothNow Gallery · ${items.size} items")
+            .setView(list)
+            .setNegativeButton("Close", null)
+            .create()
+        dialog.show()
+        dialog.window?.setLayout((resources.displayMetrics.widthPixels * 0.92f).toInt(), (resources.displayMetrics.heightPixels * 0.78f).toInt())
     }
 
     private fun showGalleryItemActions(item: GalleryItem) {
-        AlertDialog.Builder(this).setTitle(item.name).setItems(arrayOf("Preview", "Share", "Delete", "Cancel")) { _, which ->
-            when (which) {
-                0 -> try { startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(item.uri, item.mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)) }
-                    catch (_: Exception) { Toast.makeText(this, "No compatible app found to preview this file", Toast.LENGTH_LONG).show() }
-                1 -> {
-                    val share = Intent(Intent.ACTION_SEND).setType(item.mime).putExtra(Intent.EXTRA_STREAM, item.uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    startActivity(Intent.createChooser(share, "Share with"))
-                }
-                2 -> AlertDialog.Builder(this).setTitle("Delete ${item.name}?").setMessage("This permanently deletes this file from your device.")
-                    .setNegativeButton("Cancel", null).setPositiveButton("Delete") { _, _ ->
-                        val deleted = contentResolver.delete(item.uri, null, null)
-                        Toast.makeText(this, if (deleted > 0) "Deleted" else "Could not delete this file", Toast.LENGTH_SHORT).show()
+        val isVideo = item.mime.startsWith("video/")
+        val preview = if (isVideo) android.widget.VideoView(this) else ImageView(this).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setBackgroundColor(android.graphics.Color.BLACK)
+            setImageURI(item.uri)
+        }
+        val previewContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(8), dp(8), dp(4))
+            setBackgroundColor(android.graphics.Color.BLACK)
+            addView(preview, LinearLayout.LayoutParams(-1, if (isVideo) dp(250) else dp(300)))
+        }
+        val previewDialog = AlertDialog.Builder(this)
+            .setTitle(item.name)
+            .setView(previewContainer)
+            .setPositiveButton("Share", null)
+            .setNeutralButton("Delete", null)
+            .setNegativeButton("Close", null)
+            .create()
+        previewDialog.setOnShowListener {
+            previewDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { shareGalleryItem(item) }
+            previewDialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                AlertDialog.Builder(this).setTitle("Delete ${item.name}?")
+                    .setMessage("This permanently deletes this file from your device.")
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Delete") { _, _ ->
+                        try {
+                            val deleted = contentResolver.delete(item.uri, null, null)
+                            Toast.makeText(this, if (deleted > 0) "Deleted from BothNow Gallery" else "Could not delete this file", Toast.LENGTH_SHORT).show()
+                            if (deleted > 0) previewDialog.dismiss()
+                        } catch (e: Exception) {
+                            Toast.makeText(this, "Delete failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                        }
                     }.show()
             }
-        }.show()
+            if (isVideo) {
+                val video = preview as android.widget.VideoView
+                video.setMediaController(android.widget.MediaController(this).apply { setAnchorView(video) })
+                video.setVideoURI(item.uri)
+                video.setOnPreparedListener { player ->
+                    player.isLooping = false
+                    video.start()
+                }
+                video.setOnErrorListener { _, _, _ ->
+                    Toast.makeText(this, "This video could not be played on this device", Toast.LENGTH_LONG).show()
+                    true
+                }
+            }
+        }
+        previewDialog.setOnDismissListener {
+            if (isVideo) (preview as android.widget.VideoView).stopPlayback()
+        }
+        previewDialog.show()
+        previewDialog.window?.setLayout((resources.displayMetrics.widthPixels * 0.94f).toInt(), -2)
+    }
+
+    private fun shareGalleryItem(item: GalleryItem) {
+        try {
+            val share = Intent(Intent.ACTION_SEND).apply {
+                type = item.mime
+                putExtra(Intent.EXTRA_STREAM, item.uri)
+                clipData = android.content.ClipData.newUri(contentResolver, item.name, item.uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(share, "Share ${if (item.mime.startsWith("video/")) "video" else "photo"}"))
+        } catch (e: Exception) {
+            Toast.makeText(this, "Could not open sharing apps: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun watermarkKey(suffix: String, format: String = activeWatermarkFormat) =

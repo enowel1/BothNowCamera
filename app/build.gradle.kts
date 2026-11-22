@@ -11,8 +11,8 @@ android {
         applicationId = "com.ktma.bothnow"
         minSdk = 29
         targetSdk = 36
-        versionCode = 6
-        versionName = "3.0"
+        versionCode = 7
+        versionName = "3.2"
     }
 
     buildTypes {

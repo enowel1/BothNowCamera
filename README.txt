@@ -49,3 +49,11 @@ The portrait frame is a composition guide. The portrait export uses its position
 Designed By: Kekeli Emmanuel
 All Rights Reserved By: Kekeli Tech Media Agency
 +233 26 478 3970 | info@ktmaonline.com | https://www.ktmaonline.com
+
+VERSION 3.2 UPDATE
+- BothNow Gallery now opens videos in an in-app player and photos in an in-app preview.
+- Share and Delete actions are available from each preview.
+- Landscape orientation places the camera preview beside a scrollable tool panel.
+- Rotation changes rearrange the interface without intentionally restarting an active recording.
+- Every completed video continues to export as both Landscape 16:9 and Portrait 9:16.
+See docs/VERSION_3.2_GALLERY_ROTATION_RELEASE_NOTES.md for details.
