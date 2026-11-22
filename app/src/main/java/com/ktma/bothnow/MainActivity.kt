@@ -443,7 +443,7 @@ class MainActivity : AppCompatActivity() {
         controlsScrollLayout = ScrollView(this).apply {
             isFillViewport = false
             clipToPadding = false
-            addView(controlsPanelLayout, ScrollView.LayoutParams(-1, -2))
+            addView(controlsPanelLayout, ViewGroup.LayoutParams(-1, -2))
         }
         mainScrollLayout = ScrollView(this).apply {
             isFillViewport = true
@@ -482,7 +482,7 @@ class MainActivity : AppCompatActivity() {
             rootLayout.addView(cameraStage, LinearLayout.LayoutParams(-1, dp(300)).apply { topMargin = dp(8); bottomMargin = dp(8) })
             rootLayout.addView(controlsScrollLayout, LinearLayout.LayoutParams(-1, -2))
             rootLayout.setPadding(dp(8), dp(6), dp(8), dp(6))
-            mainScrollLayout.addView(rootLayout, ScrollView.LayoutParams(-1, -2))
+            mainScrollLayout.addView(rootLayout, ViewGroup.LayoutParams(-1, -2))
             setContentView(mainScrollLayout)
             ViewCompat.setOnApplyWindowInsetsListener(mainScrollLayout) { view, insets ->
                 val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
