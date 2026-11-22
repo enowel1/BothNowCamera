@@ -1,18 +1,19 @@
-BothNow Camera — Dual-format native Android camera app
+BothNow Camera 2.2 — Dual-format native Android camera app
 
 ## Features
 - Native CameraX camera preview, photo capture, front/rear camera, torch, zoom and tap-to-focus.
 - Live 16:9 landscape and 9:16 portrait framing guides.
 - Drag the portrait guide to change the portrait crop position. Tap outside the guide to focus.
 - Record one source video once, then export Landscape 1920×1080 and Portrait 1080×1920 MP4 files.
-- Upload your own PNG/JPG/WEBP logo. The logo appears in the live camera preview and is burned into both exports.
-- Drag the live logo, or use the corner/center controls. Adjust size and opacity.
+- Upload one PNG/JPG/WEBP logo and display two independent live watermark previews: one inside the landscape frame and one inside the portrait frame.
+- Configure portrait and landscape watermark position, size and opacity independently; drag either preview logo to position it.
+- Pinch the camera preview to zoom, or use the zoom slider. Tap to focus.
 - Videos save to Movies/BothNow; photos save to Pictures/BothNow.
 - In-app privacy policy and developer contact details.
 
 ## Build configuration
 - Application ID: `com.ktma.bothnow` (keep this unchanged to update the existing app).
-- Version 2.1, versionCode 3.
+- Version 2.2, versionCode 4.
 - compileSdk 36 / targetSdk 36 / minSdk 29.
 - Android Gradle Plugin 8.10.1, Gradle 8.13, Kotlin 2.2.20, Java 17.
 - CameraX 1.4.2 and AndroidX Media3 1.6.1.
